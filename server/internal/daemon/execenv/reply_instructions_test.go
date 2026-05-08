@@ -7,8 +7,13 @@ import (
 	"testing"
 )
 
+// Pins runtimeGOOS to "linux": the Windows reply template has its own
+// dedicated test (TestBuildCommentReplyInstructionsWindowsUsesContentFile).
+// Not parallel: mutates the package-level runtimeGOOS.
 func TestBuildCommentReplyInstructionsIncludesTriggerID(t *testing.T) {
-	t.Parallel()
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+	runtimeGOOS = "linux"
 
 	issueID := "11111111-1111-1111-1111-111111111111"
 	triggerID := "22222222-2222-2222-2222-222222222222"
@@ -42,8 +47,13 @@ func TestBuildCommentReplyInstructionsEmptyWhenNoTrigger(t *testing.T) {
 	}
 }
 
+// Pins runtimeGOOS to "linux" so the helper output is deterministic.
+// Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigCommentTriggerUsesHelper(t *testing.T) {
-	t.Parallel()
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+	runtimeGOOS = "linux"
+
 	dir := t.TempDir()
 
 	issueID := "11111111-1111-1111-1111-111111111111"
@@ -172,19 +182,31 @@ func TestInjectRuntimeConfigWindowsCommentTriggerHasNoStdin(t *testing.T) {
 				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file",
 				"--content-file",
 				"--description-file",
-				"Windows shell encoding caveat",
+				"On this Windows host",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing %q\n---\n%s", fileName, want, s)
 				}
 			}
 
-			// The per-turn reply template, the Codex paragraph, and the
-			// Available Commands section must NOT end up directing the agent
-			// at stdin — that is the exact pattern Windows shells mangle.
+			// The Available Commands section, the Codex paragraph, and the
+			// per-turn reply template must NOT end up prescriptively
+			// directing the agent at stdin — that is the exact pattern
+			// Windows shells mangle. Covers GPT-Boy's second blocker on
+			// PR #2247: the original Windows-only fallback was appended
+			// *after* unconditional "MUST pipe via stdin" /
+			// `--description-stdin` lines, leaving agents with
+			// conflicting instructions. We pin the prescriptive
+			// phrasings (not bare flag names) so anti-prescriptive prose
+			// like "do NOT pipe via `--content-stdin`" doesn't trip the
+			// ban.
 			for _, banned := range []string{
 				"--parent " + triggerID + " --content-stdin",
 				"always use `--content-stdin` with a HEREDOC, even for short single-line replies",
+				"MUST pipe via stdin",
+				"use `--description-stdin` and pipe a HEREDOC",
+				"<<'COMMENT'",
+				"Agent-authored comments should always pipe content via stdin",
 			} {
 				if strings.Contains(s, banned) {
 					t.Errorf("%s still steers agent at stdin: %q\n---\n%s", fileName, banned, s)
