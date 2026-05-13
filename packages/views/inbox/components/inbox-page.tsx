@@ -47,6 +47,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -245,21 +246,23 @@ export function InboxPage() {
             )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">
-            <DropdownMenuLabel>{t(($) => $.filter.label)}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={readFilter}
-              onValueChange={(value) => setReadFilter(value as InboxReadFilter)}
-            >
-              <DropdownMenuRadioItem value="all">
-                {t(($) => $.filter.all)}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="unread">
-                {t(($) => $.filter.unread)}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="read">
-                {t(($) => $.filter.read)}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{t(($) => $.filter.label)}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={readFilter}
+                onValueChange={(value) => setReadFilter(value as InboxReadFilter)}
+              >
+                <DropdownMenuRadioItem value="all">
+                  {t(($) => $.filter.all)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="unread">
+                  {t(($) => $.filter.unread)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="read">
+                  {t(($) => $.filter.read)}
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
         <DropdownMenu>
