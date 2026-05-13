@@ -392,6 +392,7 @@ export class ApiClient {
   async markOnboardingComplete(payload?: {
     completion_path?: OnboardingCompletionPath;
     workspace_id?: string;
+    onboarding_session_id?: string;
   }): Promise<User> {
     return this.fetch("/api/me/onboarding/complete", {
       method: "POST",
@@ -411,6 +412,7 @@ export class ApiClient {
 
   async patchOnboarding(payload: {
     questionnaire?: Record<string, unknown>;
+    onboarding_session_id?: string;
   }): Promise<User> {
     return this.fetch("/api/me/onboarding", {
       method: "PATCH",

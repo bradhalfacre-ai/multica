@@ -398,18 +398,22 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 // teamSizeOther / roleOther / useCaseOther are presence booleans only —
 // the free-text content is kept in the DB for product research but not
 // broadcast via analytics (PII risk + low cardinality ask).
-func OnboardingQuestionnaireSubmitted(userID, teamSize, role, useCase string, teamSizeOther, roleOther, useCaseOther bool) Event {
+func OnboardingQuestionnaireSubmitted(userID, teamSize, role, useCase string, teamSizeOther, roleOther, useCaseOther bool, onboardingSessionID string) Event {
+	props := map[string]any{
+		"team_size":           teamSize,
+		"role":                role,
+		"use_case":            useCase,
+		"team_size_has_other": teamSizeOther,
+		"role_has_other":      roleOther,
+		"use_case_has_other":  useCaseOther,
+	}
+	if onboardingSessionID != "" {
+		props["onboarding_session_id"] = onboardingSessionID
+	}
 	return Event{
 		Name:       EventOnboardingQuestionnaireSubmit,
 		DistinctID: userID,
-		Properties: withCoreProperties(map[string]any{
-			"team_size":           teamSize,
-			"role":                role,
-			"use_case":            useCase,
-			"team_size_has_other": teamSizeOther,
-			"role_has_other":      roleOther,
-			"use_case_has_other":  useCaseOther,
-		}, CoreProperties{
+		Properties: withCoreProperties(props, CoreProperties{
 			UserID: userID,
 			Source: SourceOnboarding,
 		}),
@@ -460,15 +464,22 @@ func AgentCreated(actorID, workspaceID, agentID, provider, runtimeMode, template
 // onboardedAt is an RFC3339 timestamp set $set_once on the person so
 // "onboarded before date X" cohorts are queryable directly from
 // person_properties without re-emitting per-event.
-func OnboardingCompleted(userID, workspaceID, completionPath, onboardedAt string, joinedCloudWaitlist bool) Event {
+func OnboardingCompleted(userID, workspaceID, completionPath, onboardedAt string, joinedCloudWaitlist bool, onboardingSessionID string) Event {
+	props := map[string]any{
+		"completion_path":       completionPath,
+		"joined_cloud_waitlist": joinedCloudWaitlist,
+	}
+	// Skip / invite paths legitimately have no session — the property is
+	// omitted there so HogQL can isolate real funnel completions with
+	// `onboarding_session_id IS NOT NULL`.
+	if onboardingSessionID != "" {
+		props["onboarding_session_id"] = onboardingSessionID
+	}
 	return Event{
 		Name:        EventOnboardingCompleted,
 		DistinctID:  userID,
 		WorkspaceID: workspaceID,
-		Properties: withCoreProperties(map[string]any{
-			"completion_path":       completionPath,
-			"joined_cloud_waitlist": joinedCloudWaitlist,
-		}, CoreProperties{
+		Properties: withCoreProperties(props, CoreProperties{
 			UserID:      userID,
 			WorkspaceID: workspaceID,
 			Source:      SourceOnboarding,

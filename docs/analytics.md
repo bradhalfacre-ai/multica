@@ -366,6 +366,18 @@ not have a workspace yet.
 |---|---|---|
 | `workspace_id` | string (UUID) | Present only when the user already has a workspace. |
 | `source` | string | Always `onboarding`. |
+| `onboarding_session_id` | string (UUID) | Issued on this event and persisted to client storage. Stamped on every onboarding_* event until the funnel terminates. Lets HogQL correlate a full funnel back to a single start, even when `distinct_id` is shared across multiple sessions or skip paths. |
+
+## `onboarding_session_id`
+
+All in-product onboarding events carry an `onboarding_session_id` so the funnel
+can be reconstructed without joining on `distinct_id` alone. The id is generated
+client-side at `onboarding_started`, persisted across reloads, attached to every
+subsequent onboarding event, and cleared on `onboarding_completed`. Paths that
+bypass the funnel entirely — `skip_existing` from Welcome and `invite_accept` —
+do not start a session and emit `onboarding_completed` with the property
+omitted. Funnel queries should filter `onboarding_session_id IS NOT NULL` to
+isolate real funnel completions from these soft-completions.
 
 ### `onboarding_questionnaire_submitted`
 
@@ -382,6 +394,7 @@ re-emit — the funnel counts users, not edits.
 | `team_size_has_other` | bool | `true` when the user filled the Q1 free-text escape. |
 | `role_has_other` | bool | Ditto Q2. |
 | `use_case_has_other` | bool | Ditto Q3. |
+| `onboarding_session_id` | string (UUID) | Forwarded from the client; lets the questionnaire submission join back to its `onboarding_started`. |
 
 Person properties set with `$set` (not once — users can go back and
 change answers before submitting again):
@@ -424,6 +437,7 @@ which exit the user took.
 | `workspace_id` | string (UUID) | Present for workspace-linked onboarding completions. |
 | `completion_path` | string | One of `full` / `runtime_skipped` / `cloud_waitlist` / `skip_existing` / `invite_accept` / `unknown`. See below. |
 | `joined_cloud_waitlist` | bool | Derived from `user.cloud_waitlist_email`. Orthogonal to `completion_path` — a user may submit the waitlist form and still pick CLI. |
+| `onboarding_session_id` | string (UUID) | Present for `full` / `runtime_skipped` / `cloud_waitlist` paths (the in-product funnel). Omitted for `skip_existing` / `invite_accept` because those bypass the funnel and never received a session. |
 
 Person properties set with `$set_once`:
 

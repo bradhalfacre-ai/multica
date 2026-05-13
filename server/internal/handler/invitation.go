@@ -478,12 +478,18 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		if onboardedUser.OnboardedAt.Valid {
 			onboardedAt = onboardedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
 		}
+		// Invite-accept is not part of the in-product onboarding funnel,
+		// so no onboarding_session_id is available. PostHog will see an
+		// empty session id on this event; HogQL funnels filter on
+		// `onboarding_session_id IS NOT NULL` to keep real funnel
+		// completions separate from these soft-completions.
 		h.Analytics.Capture(analytics.OnboardingCompleted(
 			userID,
 			wsID,
 			analytics.OnboardingPathInviteAccept,
 			onboardedAt,
 			onboardedUser.CloudWaitlistEmail.Valid,
+			"",
 		))
 	}
 

@@ -44,8 +44,9 @@ const (
 // legacy clients still complete the flow cleanly, just without a
 // funnel-ready label.
 type completeOnboardingRequest struct {
-	CompletionPath string `json:"completion_path,omitempty"`
-	WorkspaceID    string `json:"workspace_id,omitempty"`
+	CompletionPath      string `json:"completion_path,omitempty"`
+	WorkspaceID         string `json:"workspace_id,omitempty"`
+	OnboardingSessionID string `json:"onboarding_session_id,omitempty"`
 }
 
 var validCompletionPaths = map[string]struct{}{
@@ -111,6 +112,7 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 			path,
 			onboardedAt,
 			user.CloudWaitlistEmail.Valid,
+			req.OnboardingSessionID,
 		))
 	}
 
@@ -118,7 +120,8 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchOnboardingRequest struct {
-	Questionnaire *json.RawMessage `json:"questionnaire,omitempty"`
+	Questionnaire       *json.RawMessage `json:"questionnaire,omitempty"`
+	OnboardingSessionID string           `json:"onboarding_session_id,omitempty"`
 }
 
 // questionnaireAnswers mirrors the frontend's `QuestionnaireAnswers`
@@ -191,6 +194,7 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 			after.TeamSizeOther != "",
 			after.RoleOther != "",
 			after.UseCaseOther != "",
+			req.OnboardingSessionID,
 		))
 	}
 

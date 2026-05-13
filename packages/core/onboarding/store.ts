@@ -1,6 +1,10 @@
 import { api } from "../api";
 import { useAuthStore } from "../auth";
 import { setPersonProperties } from "../analytics";
+import {
+  clearOnboardingSession,
+  getOnboardingSessionId,
+} from "./session";
 import type { OnboardingCompletionPath, QuestionnaireAnswers } from "./types";
 
 /**
@@ -16,7 +20,11 @@ import type { OnboardingCompletionPath, QuestionnaireAnswers } from "./types";
 export async function saveQuestionnaire(
   answers: Partial<QuestionnaireAnswers>,
 ): Promise<void> {
-  const user = await api.patchOnboarding({ questionnaire: answers });
+  const onboardingSessionId = getOnboardingSessionId() ?? undefined;
+  const user = await api.patchOnboarding({
+    questionnaire: answers,
+    onboarding_session_id: onboardingSessionId,
+  });
   useAuthStore.getState().setUser(user);
   // Mirror the three cohort signals into person properties so every
   // PostHog event on this user can be broken down by role / use_case /
@@ -44,11 +52,20 @@ export async function completeOnboarding(
   completionPath?: OnboardingCompletionPath,
   workspaceId?: string,
 ): Promise<void> {
-  await api.markOnboardingComplete(
-    completionPath || workspaceId
-      ? { completion_path: completionPath, workspace_id: workspaceId }
-      : undefined,
-  );
+  const onboardingSessionId = getOnboardingSessionId() ?? undefined;
+  const payload =
+    completionPath || workspaceId || onboardingSessionId
+      ? {
+          completion_path: completionPath,
+          workspace_id: workspaceId,
+          onboarding_session_id: onboardingSessionId,
+        }
+      : undefined;
+  await api.markOnboardingComplete(payload);
+  // Clear the session AFTER the server records it. The funnel terminus
+  // is over — any subsequent re-entry into onboarding starts a fresh
+  // session (and a fresh id), which is what we want.
+  clearOnboardingSession();
   await useAuthStore.getState().refreshMe();
 }
 

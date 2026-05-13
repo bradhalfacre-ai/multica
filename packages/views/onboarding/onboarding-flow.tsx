@@ -10,6 +10,7 @@ import {
   completeOnboarding,
   ONBOARDING_STEP_ORDER,
   saveQuestionnaire,
+  startOnboardingSession,
   type OnboardingCompletionPath,
   type OnboardingStep,
   type QuestionnaireAnswers,
@@ -98,6 +99,10 @@ export function OnboardingFlow({
   useEffect(() => {
     if (startedEmittedRef.current || !workspacesFetched) return;
     startedEmittedRef.current = true;
+    // Issue the funnel session id BEFORE emitting `onboarding_started`
+    // so the analytics wrapper picks it up and stamps it on the event
+    // (and every subsequent onboarding_* event until completion).
+    startOnboardingSession();
     captureEvent("onboarding_started", {
       source: "onboarding",
       ...(existingWorkspace ? { workspace_id: existingWorkspace.id } : {}),

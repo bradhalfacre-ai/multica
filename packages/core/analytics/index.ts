@@ -13,6 +13,7 @@
 // backend returns an empty key and this module stays inert.
 
 import posthog from "posthog-js";
+import { getOnboardingSessionId } from "../onboarding/session";
 
 export const EVENT_SCHEMA_VERSION = 2;
 
@@ -282,6 +283,14 @@ function withClientEventProperties(
   }
   if (next.is_demo === undefined) {
     next.is_demo = false;
+  }
+  // Attach the active onboarding session id when one is in progress.
+  // Stamped on every client event (not just onboarding_*) so a stray
+  // event fired mid-funnel can still be joined back; HogQL filters by
+  // event name when it cares.
+  if (next.onboarding_session_id === undefined) {
+    const sessionId = getOnboardingSessionId();
+    if (sessionId) next.onboarding_session_id = sessionId;
   }
   return next;
 }
