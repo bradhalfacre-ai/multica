@@ -14,6 +14,7 @@ import (
 type runningSquadLeaderTaskFixture struct {
 	IssueID          string
 	LeaderID         string
+	RuntimeID        string
 	TaskID           string
 	TriggerCommentID string
 }
@@ -59,6 +60,7 @@ func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixtur
 	return runningSquadLeaderTaskFixture{
 		IssueID:          issueID,
 		LeaderID:         fx.LeaderID,
+		RuntimeID:        runtimeID,
 		TaskID:           taskID,
 		TriggerCommentID: triggerCommentID,
 	}
@@ -93,7 +95,7 @@ func completeRunningTask(t *testing.T, fx runningSquadLeaderTaskFixture, output 
 	w := httptest.NewRecorder()
 	r := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+fx.TaskID+"/complete",
 		map[string]any{"output": output},
-		testWorkspaceID, "legit-daemon")
+		testWorkspaceID, daemonIDForRuntime(t, fx.RuntimeID))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", fx.TaskID)
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))

@@ -284,7 +284,7 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 	w = httptest.NewRecorder()
 	heartbeatReq := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id": runtimeID,
-	}, testWorkspaceID, "runtime-local-skills-daemon")
+	}, testWorkspaceID, daemonIDForRuntime(t, runtimeID))
 	testHandler.DaemonHeartbeat(w, heartbeatReq)
 	if w.Code != http.StatusOK {
 		t.Fatalf("DaemonHeartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -328,7 +328,7 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 					},
 				},
 			},
-		}, testWorkspaceID, "runtime-local-skills-daemon"),
+		}, testWorkspaceID, daemonIDForRuntime(t, runtimeID)),
 		"runtimeId", runtimeID,
 		"requestId", importReq.ID,
 	)
@@ -412,7 +412,7 @@ func TestReportLocalSkillImportResult_IgnoresTimedOutRequests(t *testing.T) {
 				"source_path": "~/.claude/skills/review-helper",
 				"provider":    "claude",
 			},
-		}, testWorkspaceID, "runtime-local-skills-daemon"),
+		}, testWorkspaceID, daemonIDForRuntime(t, runtimeID)),
 		"runtimeId", runtimeID,
 		"requestId", importReq.ID,
 	)

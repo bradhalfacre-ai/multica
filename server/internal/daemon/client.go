@@ -103,8 +103,8 @@ func CallWorkspaceIDFromContext(ctx context.Context) string {
 }
 
 // TokenResolver returns the Authorization token a daemon client should send
-// for a given request context. It is consulted on every request; an empty
-// return falls back to the Client's default token.
+// for a given request context. It is consulted on every HTTP request; an empty
+// return means no Authorization header is sent.
 type TokenResolver func(ctx context.Context) string
 
 // Client handles HTTP communication with the Multica server daemon API.
@@ -172,9 +172,9 @@ func (c *Client) SetToken(token string) {
 }
 
 // SetTokenResolver installs a per-request token resolver. When set, every
-// request consults the resolver first (passing the request's context); an
-// empty return falls back to the static token from SetToken. The daemon
-// uses this in mdt_ mode to pick the right per-workspace credential.
+// HTTP request uses the resolver result as-is. The static token from SetToken
+// remains available through Token() for non-HTTP paths such as the daemon
+// WebSocket handshake.
 func (c *Client) SetTokenResolver(r TokenResolver) {
 	c.resolver = r
 }
@@ -184,15 +184,12 @@ func (c *Client) Token() string {
 	return c.token
 }
 
-// tokenForRequest picks the token for an outgoing request: resolver first
-// (when configured), then the static token. An empty result means "send no
-// Authorization header" — the server will 401 and the caller decides how
-// to react.
+// tokenForRequest picks the token for an outgoing HTTP request. Resolver mode
+// is strict: an untagged context must not fall back to the static token, or a
+// multi-workspace mdt_ daemon can leak calls through the first workspace.
 func (c *Client) tokenForRequest(ctx context.Context) string {
 	if c.resolver != nil {
-		if tok := c.resolver(ctx); tok != "" {
-			return tok
-		}
+		return c.resolver(ctx)
 	}
 	return c.token
 }

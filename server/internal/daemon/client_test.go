@@ -37,6 +37,29 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 	}
 }
 
+func TestClient_TokenResolverDoesNotFallbackToStaticToken(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("first-workspace-token")
+	c.SetTokenResolver(func(context.Context) string { return "" })
+
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON: %v", err)
+	}
+	if gotAuth != "" {
+		t.Fatalf("Authorization = %q, want empty when resolver returns no token", gotAuth)
+	}
+	if got := c.Token(); got != "first-workspace-token" {
+		t.Fatalf("Token() = %q, want static token preserved for non-HTTP paths", got)
+	}
+}
+
 func TestClient_IdentityHeaders_GetJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Client-Platform"); got != "daemon" {

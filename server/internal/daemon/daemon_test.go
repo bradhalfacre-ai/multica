@@ -861,6 +861,24 @@ func (b *fakeBackend) Execute(_ context.Context, _ string, opts agent.ExecOption
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
 }
 
+type scriptedBackend struct {
+	messages []agent.Message
+	result   agent.Result
+}
+
+func (b scriptedBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+	go func() {
+		for _, msg := range b.messages {
+			msgCh <- msg
+		}
+		close(msgCh)
+		resCh <- b.result
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
 func newTestDaemon(t *testing.T) *Daemon {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -890,6 +908,95 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	// "directory not empty" cleanup error.
 	t.Cleanup(d.waitBackgroundSyncs)
 	return d
+}
+
+func TestDaemonChildEnvTokenUsesTaskWorkspaceCredential(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{
+		client:   NewClient("http://example.test"),
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		authMode: "daemon_token",
+		workspaceTokens: map[string]string{
+			"ws-1": "mdt_first_workspace",
+			"ws-2": "mdt_second_workspace",
+		},
+	}
+	d.client.SetToken("mdt_first_workspace")
+
+	if got := d.tokenForWorkspace("ws-2"); got != "mdt_second_workspace" {
+		t.Fatalf("tokenForWorkspace(ws-2) = %q, want second workspace token", got)
+	}
+	if got := d.tokenForWorkspace("missing"); got != "" {
+		t.Fatalf("tokenForWorkspace(missing) = %q, want empty token instead of static fallback", got)
+	}
+
+	d.authMode = "pat"
+	d.client.SetToken("mul_pat")
+	if got := d.tokenForWorkspace("ws-2"); got != "mul_pat" {
+		t.Fatalf("PAT tokenForWorkspace = %q, want legacy static PAT", got)
+	}
+}
+
+func TestExecuteAndDrain_TaskScopedAsyncCallsUseWorkspaceToken(t *testing.T) {
+	t.Parallel()
+
+	type authRecord struct {
+		path string
+		auth string
+	}
+	records := make(chan authRecord, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/daemon/tasks/task-ws-2/messages", "/api/daemon/tasks/task-ws-2/session":
+			records <- authRecord{path: r.URL.Path, auth: r.Header.Get("Authorization")}
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:   NewClient(srv.URL),
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		authMode: "daemon_token",
+		workspaceTokens: map[string]string{
+			"ws-1": "mdt_first_workspace",
+			"ws-2": "mdt_second_workspace",
+		},
+	}
+	d.client.SetToken("mdt_first_workspace")
+	d.client.SetTokenResolver(d.tokenForCtx)
+
+	ctx := d.ctxForWorkspace(context.Background(), "ws-2")
+	_, _, err := d.executeAndDrain(ctx, scriptedBackend{
+		messages: []agent.Message{
+			{Type: agent.MessageStatus, SessionID: "sess-ws-2"},
+			{Type: agent.MessageText, Content: "hello from ws-2"},
+		},
+		result: agent.Result{Status: "completed", Output: "done"},
+	}, "prompt", agent.ExecOptions{Cwd: "/tmp/ws-2", Timeout: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)), "task-ws-2")
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+
+	got := map[string]string{}
+	deadline := time.After(2 * time.Second)
+	for len(got) < 2 {
+		select {
+		case rec := <-records:
+			got[rec.path] = rec.auth
+		case <-deadline:
+			t.Fatalf("timed out waiting for async task reports; got %+v", got)
+		}
+	}
+
+	for _, path := range []string{"/api/daemon/tasks/task-ws-2/messages", "/api/daemon/tasks/task-ws-2/session"} {
+		if got[path] != "Bearer mdt_second_workspace" {
+			t.Fatalf("%s Authorization = %q, want second workspace token", path, got[path])
+		}
+	}
 }
 
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {

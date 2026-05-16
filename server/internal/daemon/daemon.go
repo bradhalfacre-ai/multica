@@ -676,8 +676,9 @@ func (d *Daemon) deregisterRuntimes() {
 			perWorkspace[ws.workspaceID] = append(perWorkspace[ws.workspaceID], rid)
 		}
 	}
-	// Capture any runtimes that somehow aren't owned by a workspace state —
-	// best-effort: send under the static token so this doesn't silently drop.
+	// Capture any runtimes that somehow aren't owned by a workspace state.
+	// In daemon-token mode the strict resolver will send these without
+	// Authorization rather than leaking the first workspace token.
 	for rid := range d.runtimeIndex {
 		owned := false
 		for _, ids := range perWorkspace {
@@ -816,6 +817,16 @@ func (d *Daemon) tokenForCtx(ctx context.Context) string {
 	wsID := CallWorkspaceIDFromContext(ctx)
 	if wsID == "" {
 		return ""
+	}
+	return d.tokenForWorkspace(wsID)
+}
+
+// tokenForWorkspace returns the credential child processes should inherit for
+// a task in workspace wsID. PAT mode keeps the legacy single-token behavior;
+// daemon-token mode must select the workspace-specific mdt_.
+func (d *Daemon) tokenForWorkspace(wsID string) string {
+	if d.authMode != "daemon_token" {
+		return d.client.Token()
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -2487,8 +2498,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
+	agentToken := d.tokenForWorkspace(task.WorkspaceID)
+	if agentToken == "" {
+		return TaskResult{}, fmt.Errorf("refusing to spawn agent: no auth token for task workspace %s", task.WorkspaceID)
+	}
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        d.client.Token(),
+		"MULTICA_TOKEN":        agentToken,
 		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
 		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
 		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
@@ -2873,6 +2888,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// message — so the watchdog must not interpret that silence as a hang.
 	var inFlightTools atomic.Int32
 	var idleWatchdogFired atomic.Bool
+	taskCallBaseCtx := context.Background()
+	if wsID := CallWorkspaceIDFromContext(ctx); wsID != "" {
+		taskCallBaseCtx = WithCallWorkspaceID(taskCallBaseCtx, wsID)
+	}
 	idleWindow := d.cfg.AgentIdleWatchdog
 	if idleWindow > 0 {
 		go d.runIdleWatchdog(agentCtx, idleWindow, &lastActivityAt, &inFlightTools, &idleWatchdogFired, agentCancel, session.Messages, taskLog, taskID)
@@ -2911,7 +2930,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			mu.Unlock()
 
 			if len(toSend) > 0 {
-				sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				sendCtx, cancel := context.WithTimeout(taskCallBaseCtx, 5*time.Second)
 				if err := d.client.ReportTaskMessages(sendCtx, taskID, toSend); err != nil {
 					taskLog.Debug("failed to report task messages", "error", err)
 				} else {
@@ -2959,7 +2978,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						sid := msg.SessionID
 						wd := opts.Cwd
 						go func() {
-							pinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							pinCtx, cancel := context.WithTimeout(taskCallBaseCtx, 5*time.Second)
 							defer cancel()
 							if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
 								taskLog.Debug("pin session failed", "error", err)

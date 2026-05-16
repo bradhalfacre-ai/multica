@@ -78,7 +78,33 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID)) {
 		return db.AgentRuntime{}, false
 	}
+	if !h.requireDaemonRuntimeBinding(w, r, rt) {
+		return db.AgentRuntime{}, false
+	}
 	return rt, true
+}
+
+// requireDaemonRuntimeBinding enforces the daemon_id boundary for mdt_ tokens.
+// PAT/JWT fallback has no daemon context and keeps the legacy membership
+// semantics.
+func (h *Handler) requireDaemonRuntimeBinding(w http.ResponseWriter, r *http.Request, rt db.AgentRuntime) bool {
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) == "" {
+		return true
+	}
+	daemonID := middleware.DaemonIDFromContext(r.Context())
+	if daemonID == "" || !rt.DaemonID.Valid || rt.DaemonID.String != daemonID {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) verifyDaemonRuntimeBinding(r *http.Request, rt db.AgentRuntime) bool {
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) == "" {
+		return true
+	}
+	daemonID := middleware.DaemonIDFromContext(r.Context())
+	return daemonID != "" && rt.DaemonID.Valid && rt.DaemonID.String == daemonID
 }
 
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
@@ -109,6 +135,29 @@ func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request
 
 	if !h.requireDaemonWorkspaceAccess(w, r, wsID) {
 		return db.AgentTaskQueue{}, false
+	}
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) != "" {
+		if !task.RuntimeID.Valid {
+			writeError(w, http.StatusNotFound, "task not found")
+			return db.AgentTaskQueue{}, false
+		}
+		rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID)
+		if err != nil {
+			if isNotFound(err) {
+				writeError(w, http.StatusNotFound, "task not found")
+				return db.AgentTaskQueue{}, false
+			}
+			slog.Warn("get task runtime failed", "task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to load task runtime")
+			return db.AgentTaskQueue{}, false
+		}
+		if uuidToString(rt.WorkspaceID) != wsID {
+			writeError(w, http.StatusNotFound, "task not found")
+			return db.AgentTaskQueue{}, false
+		}
+		if !h.requireDaemonRuntimeBinding(w, r, rt) {
+			return db.AgentTaskQueue{}, false
+		}
 	}
 	return task, true
 }
@@ -281,6 +330,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	installSource := "" // empty => UpsertAgentRuntime keeps the prior metadata
 	if daemonWsID := middleware.DaemonWorkspaceIDFromContext(r.Context()); daemonWsID != "" {
 		if daemonWsID != req.WorkspaceID {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		if daemonID := middleware.DaemonIDFromContext(r.Context()); daemonID == "" || daemonID != req.DaemonID {
 			writeError(w, http.StatusNotFound, "workspace not found")
 			return
 		}
@@ -602,6 +655,10 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("deregister: workspace mismatch", "runtime_id", rid)
 			continue
 		}
+		if !h.verifyDaemonRuntimeBinding(r, rt) {
+			slog.Warn("deregister: daemon mismatch", "runtime_id", rid)
+			continue
+		}
 
 		if err := h.Queries.SetAgentRuntimeOffline(r.Context(), rt.ID); err != nil {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
@@ -749,6 +806,10 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		outcome = "workspace_denied"
 		return
 	}
+	if !h.requireDaemonRuntimeBinding(w, r, rt) {
+		outcome = "daemon_denied"
+		return
+	}
 	authMs = time.Since(start).Milliseconds()
 
 	ack, m, err := h.processHeartbeat(r.Context(), rt)
@@ -820,6 +881,9 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	}
 	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
+	}
+	if identity.WorkspaceID != "" && (identity.DaemonID == "" || !rt.DaemonID.Valid || rt.DaemonID.String != identity.DaemonID) {
+		return nil, fmt.Errorf("runtime not in connection daemon")
 	}
 	ack, _, err := h.processHeartbeat(ctx, rt)
 	return ack, err
