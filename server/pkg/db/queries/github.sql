@@ -199,7 +199,9 @@ WHERE EXCLUDED.updated_at >= github_pull_request_check_suite.updated_at;
 -- (and deleted) by DrainPendingCheckSuitesForPR once the matching
 -- `pull_request` webhook lands. ON CONFLICT keeps the newest payload
 -- for the same (workspace, repo, pr_number, suite_id) — repeated
--- deliveries while the PR is still missing are idempotent.
+-- deliveries while the PR is still missing are idempotent. The
+-- suite_updated_at guard mirrors UpsertPullRequestCheckSuite so an older
+-- event arriving after a newer one cannot overwrite the newer payload.
 INSERT INTO github_pending_check_suite (
     workspace_id, installation_id, repo_owner, repo_name, pr_number,
     suite_id, head_sha, app_id, conclusion, status, suite_updated_at
@@ -214,7 +216,8 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number, suite_id) DO UPDATE
     conclusion       = EXCLUDED.conclusion,
     status           = EXCLUDED.status,
     suite_updated_at = EXCLUDED.suite_updated_at,
-    received_at      = now();
+    received_at      = now()
+WHERE EXCLUDED.suite_updated_at >= github_pending_check_suite.suite_updated_at;
 
 -- name: DrainPendingCheckSuitesForPR :many
 -- Atomically reads + deletes all pending suites for the given PR address.

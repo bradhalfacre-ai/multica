@@ -668,6 +668,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number, suite_id) DO UPDATE
     status           = EXCLUDED.status,
     suite_updated_at = EXCLUDED.suite_updated_at,
     received_at      = now()
+WHERE EXCLUDED.suite_updated_at >= github_pending_check_suite.suite_updated_at
 `
 
 type UpsertPendingCheckSuiteParams struct {
@@ -691,7 +692,9 @@ type UpsertPendingCheckSuiteParams struct {
 // (and deleted) by DrainPendingCheckSuitesForPR once the matching
 // `pull_request` webhook lands. ON CONFLICT keeps the newest payload
 // for the same (workspace, repo, pr_number, suite_id) — repeated
-// deliveries while the PR is still missing are idempotent.
+// deliveries while the PR is still missing are idempotent. The
+// suite_updated_at guard mirrors UpsertPullRequestCheckSuite so an older
+// event arriving after a newer one cannot overwrite the newer payload.
 func (q *Queries) UpsertPendingCheckSuite(ctx context.Context, arg UpsertPendingCheckSuiteParams) error {
 	_, err := q.db.Exec(ctx, upsertPendingCheckSuite,
 		arg.WorkspaceID,

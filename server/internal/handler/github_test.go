@@ -1079,6 +1079,46 @@ func TestWebhook_CheckSuite_OutOfOrderReplaysOnPRUpsert(t *testing.T) {
 	}
 }
 
+// TestWebhook_CheckSuite_OutOfOrderStashKeepsNewer guards the pending
+// stash against the same out-of-order trap the live table already
+// handles: while the PR row is still missing, an older event for the
+// same suite_id must not overwrite a newer payload that was stashed
+// first. Without the suite_updated_at guard on UpsertPendingCheckSuite,
+// a late `requested/in_progress` arriving after `completed/success`
+// would roll the stash back to pending; the subsequent PR upsert would
+// then replay the stale state and the PR card would stay stuck on
+// "pending" until the next suite shipped.
+func TestWebhook_CheckSuite_OutOfOrderStashKeepsNewer(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "ci-stash-order-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	head := "stash01234567"
+	// Newer event lands FIRST while the PR row does not exist yet.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-stash", []int32{77}, 6001, 8001, head, "completed", "completed", "success", "2026-05-01T00:05:00Z")
+	// Older event for the SAME suite arrives later (webhook reorder). The
+	// pending stash must keep the newer payload.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-stash", []int32{77}, 6001, 8001, head, "requested", "in_progress", "", "2026-05-01T00:00:00Z")
+
+	// PR webhook arrives — drain replays the (still newer) stash.
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-stash", 77, "opened", head, "")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row after PR webhook, got %d", len(rows))
+	}
+	if rows[0].ChecksPassed != 1 || rows[0].ChecksPending != 0 || rows[0].ChecksTotal != 1 {
+		t.Fatalf("expected passed=1 pending=0 total=1 (newer stash preserved), got passed=%d pending=%d total=%d",
+			rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	}
+}
+
 // TestWebhook_PullRequest_SynchronizeClearsMergeable verifies that
 // `synchronize` sets mergeable_state to NULL even when the payload still
 // carries the previous "clean" verdict — the old answer no longer applies
