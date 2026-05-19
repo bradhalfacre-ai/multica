@@ -379,8 +379,43 @@ Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`
 ### Comments
 
 ```bash
-# List comments
+# List comments — flat timeline, chronological. Hard cap of 2000 rows; on
+# long-running issues prefer one of the thread-aware reads below to keep
+# context windows tight.
 multica issue comment list <issue-id>
+
+# Single thread (root + every descendant). Anchor may be the root itself
+# or any reply inside the thread — the server walks up to the root.
+multica issue comment list <issue-id> --thread <comment-id>
+
+# Single thread, capped to the N most recent replies. The thread root is
+# always included (even with --tail 0), so an agent landing on a long
+# thread keeps the "what is this about" context without dragging hundreds
+# of replies into its prompt.
+multica issue comment list <issue-id> --thread <comment-id> --tail 30
+
+# Scroll older replies inside the same thread. --before / --before-id are
+# the reply cursor that the previous response emitted on stderr as
+# `Next reply cursor: --before <ts> --before-id <reply-id>`.
+multica issue comment list <issue-id> --thread <comment-id> --tail 30 \
+    --before <ts> --before-id <reply-id>
+
+# Most recently active threads (root + every descendant), grouped by
+# thread. Returns N complete conversational arcs, oldest-active first so
+# the freshest thread sits closest to "now" in an agent prompt.
+multica issue comment list <issue-id> --recent 20
+
+# Scroll older threads. Under --recent, --before / --before-id are a
+# THREAD cursor (thread last_activity_at + root id), emitted on stderr as
+# `Next thread cursor: --before <ts> --before-id <root-id>`.
+multica issue comment list <issue-id> --recent 20 \
+    --before <ts> --before-id <root-id>
+
+# Incremental polling. Combines with --thread or --recent; filters out
+# replies created on or before <ts> from the page (the thread root is
+# exempt so the agent always gets context).
+multica issue comment list <issue-id> --thread <comment-id> --tail 30 \
+    --since <RFC3339-timestamp>
 
 # Add a comment
 multica issue comment add <issue-id> --content "Looks good, merging now"
@@ -391,6 +426,21 @@ multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 # Delete a comment
 multica issue comment delete <comment-id>
 ```
+
+**`--before` / `--before-id` semantics depend on the paging mode**, by
+design — same flag, different scope:
+
+| Mode | What the cursor walks | stderr label |
+| --- | --- | --- |
+| `--recent N` | Older *threads* (last_activity_at, root_id) | `Next thread cursor` |
+| `--thread <id> --tail N` | Older *replies* inside that thread (created_at, id) | `Next reply cursor` |
+
+Outside those two modes (`--thread` without `--tail`, or no `--thread`
+and no `--recent`) the cursor flags are rejected so they cannot silently
+no-op. The server emits the cursor headers (`X-Multica-Next-Before` /
+`X-Multica-Next-Before-Id`) only when an older page actually exists —
+exact-boundary pages (e.g. `--tail 3` on a thread with exactly 3
+replies) intentionally return no cursor so callers stop paginating.
 
 ### Subscribers
 

@@ -340,6 +340,14 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		// cursor (--before / --before-id under --thread + --tail) scrolls
 		// to older replies inside the same thread.
 		if args.ThreadTailSet {
+			// Probe for has-more by asking the SQL for one extra reply
+			// beyond what the caller wants. If we get back >tail replies
+			// there is at least one older reply still on disk; if we get
+			// back ≤tail the page is the tail of the thread and there is
+			// nothing older to scroll to (so we must NOT emit a cursor —
+			// otherwise the next page is wasted round-trip that returns
+			// just the root). This is the exact-boundary fix called out
+			// in the MUL-2421 review.
 			rows, err := h.Queries.ListThreadCommentsForIssuePaged(ctx, db.ListThreadCommentsForIssuePagedParams{
 				AnchorID:    anchor,
 				IssueID:     issue.ID,
@@ -347,7 +355,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				HasCursor:   args.HasCursor,
 				BeforeAt:    args.BeforeAt,
 				BeforeID:    args.BeforeID,
-				ReplyLimit:  int32(args.ThreadTail),
+				ReplyLimit:  int32(args.ThreadTail) + 1,
 			})
 			if err != nil {
 				return fetchCommentsResult{}, err
@@ -355,16 +363,14 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			if len(rows) == 0 {
 				return fetchCommentsResult{}, errCommentThreadNotFound
 			}
-			// Identify the thread root: the only row in the result whose
-			// parent_id is NULL. Used both to skip the root when picking
-			// the cursor (cursor is a *reply* cursor) and to make sure the
-			// since filter never strips it.
-			out := make([]db.Comment, 0, len(rows))
-			var oldestReplyCreatedAt pgtype.Timestamptz
-			var oldestReplyID pgtype.UUID
-			replyCount := 0
+			// Split the result into root + replies (ASC order preserved).
+			// Root is identified by parent_id IS NULL and is always
+			// present in the SQL output; we keep it out of the cursor /
+			// tail-trim logic so the user always sees thread context.
+			var rootComment *db.Comment
+			replies := make([]db.Comment, 0, len(rows))
 			for _, r := range rows {
-				comment := db.Comment{
+				c := db.Comment{
 					ID:             r.ID,
 					IssueID:        r.IssueID,
 					AuthorType:     r.AuthorType,
@@ -379,36 +385,48 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					ResolvedByType: r.ResolvedByType,
 					ResolvedByID:   r.ResolvedByID,
 				}
-				isRoot := !r.ParentID.Valid
-				// The SQL emits rows chronologically ASC, so the first
-				// non-root row is the oldest reply on the page — that is
-				// the cursor for the next (older) page.
-				if !isRoot {
-					if replyCount == 0 {
-						oldestReplyCreatedAt = r.CreatedAt
-						oldestReplyID = r.ID
-					}
-					replyCount++
-				}
-				// since drops stale rows AFTER the tail / cursor cut. The
-				// root is exempt: a reader who set --since to skip already-
-				// seen replies still needs the root context if the page
-				// only contained the root.
-				if !isRoot && args.Since.Valid && !r.CreatedAt.Time.After(args.Since.Time) {
+				if !r.ParentID.Valid {
+					root := c
+					rootComment = &root
 					continue
 				}
-				out = append(out, comment)
+				replies = append(replies, c)
 			}
-			// Emit a reply cursor only when the page is full (returned
-			// exactly the requested reply count). Under-full = no older
-			// replies remain. The since filter does NOT suppress the
-			// cursor here: each page walks strictly older replies, and a
+			// Trim the probe overflow back to the caller's tail. The SQL
+			// emits ASC, so the extra row is the oldest reply — dropping
+			// it from the head is what aligns "newest N" with the user's
+			// request.
+			hasMore := len(replies) > args.ThreadTail
+			if hasMore {
+				replies = replies[1:]
+			}
+			out := make([]db.Comment, 0, len(replies)+1)
+			if rootComment != nil {
+				out = append(out, *rootComment)
+			}
+			for _, r := range replies {
+				// since drops stale rows AFTER the tail / cursor cut.
+				// The root is exempt (already appended above): a reader
+				// who set --since to skip already-seen replies still
+				// needs the root context if the page only contained
+				// the root.
+				if args.Since.Valid && !r.CreatedAt.Time.After(args.Since.Time) {
+					continue
+				}
+				out = append(out, r)
+			}
+			// Emit a reply cursor only when we proved an older reply
+			// exists (hasMore). On an exact-boundary page (replyCount
+			// == tail with no overflow) hasMore is false and the cursor
+			// stays empty. The since filter does NOT suppress the
+			// cursor: each page walks strictly older replies, and a
 			// caller polling with `since` legitimately wants to scroll
 			// older history even when the current page has nothing new.
 			res := fetchCommentsResult{Comments: out}
-			if args.ThreadTail > 0 && replyCount >= args.ThreadTail && oldestReplyCreatedAt.Valid && oldestReplyID.Valid {
-				res.NextBefore = oldestReplyCreatedAt.Time.UTC().Format(time.RFC3339Nano)
-				res.NextBeforeID = uuidToString(oldestReplyID)
+			if hasMore && len(replies) > 0 {
+				oldest := replies[0]
+				res.NextBefore = oldest.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+				res.NextBeforeID = uuidToString(oldest.ID)
 			}
 			return res, nil
 		}

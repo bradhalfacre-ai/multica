@@ -781,6 +781,24 @@ func TestListComments_ThreadTailEmitsReplyCursorWhenPageFull(t *testing.T) {
 			t.Fatalf("cursor before = %q is not RFC3339Nano: %v", nb, err)
 		}
 	})
+
+	t.Run("exact-boundary page emits no cursor", func(t *testing.T) {
+		// root1 has exactly 3 replies (r1a, r1b, r1b1). Requesting --tail 3
+		// returns the entire reply set; there is nothing older to scroll
+		// to, so no cursor must be emitted. Pre-fix the server used
+		// `replyCount >= tail` and falsely sent a cursor here — the next
+		// page then returned just the root, wasting a round-trip.
+		// (MUL-2421 review fix.)
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "3")
+		w, rows := listComments(t, fx.IssueID, v.Encode())
+		eqIDs(t, ids(rows), []string{fx.Root1, fx.R1a, fx.R1b, fx.R1b1}, "tail==replyCount returns full thread")
+		nb, nbid := nextReplyCursor(w)
+		if nb != "" || nbid != "" {
+			t.Fatalf("exact-boundary page must not emit cursor, got before=%q before_id=%q", nb, nbid)
+		}
+	})
 }
 
 // TestListComments_ThreadTailCursorScrollsOlderReplies walks a long thread
@@ -818,24 +836,17 @@ func TestListComments_ThreadTailCursorScrollsOlderReplies(t *testing.T) {
 	}
 
 	// Page 3: cursor points at r1b → server returns r1a (the last reply).
+	// r1a is the oldest reply in the thread, so the server must NOT emit a
+	// cursor — the next page would return just the root, which is a wasted
+	// round-trip. (MUL-2421 review: probe `reply_limit + 1` to detect
+	// has-more instead of trusting replyCount >= tail.)
 	v.Set("before", nb2)
 	v.Set("before_id", nbid2)
 	w3, page3 := listComments(t, fx.IssueID, v.Encode())
-	eqIDs(t, ids(page3), []string{fx.Root1, fx.R1a}, "page3 = root + r1a")
+	eqIDs(t, ids(page3), []string{fx.Root1, fx.R1a}, "page3 = root + r1a (last reply)")
 	nb3, nbid3 := nextReplyCursor(w3)
-	if nb3 == "" || nbid3 != fx.R1a {
-		t.Fatalf("page3 cursor = (%q, %q), want (non-empty, %q)", nb3, nbid3, fx.R1a)
-	}
-
-	// Page 4: cursor points at r1a → no older replies. Body = root only,
-	// no cursor.
-	v.Set("before", nb3)
-	v.Set("before_id", nbid3)
-	w4, page4 := listComments(t, fx.IssueID, v.Encode())
-	eqIDs(t, ids(page4), []string{fx.Root1}, "page4 = root only (no older replies)")
-	nb4, nbid4 := nextReplyCursor(w4)
-	if nb4 != "" || nbid4 != "" {
-		t.Fatalf("page4 cursor = (%q, %q), want both empty (end-of-thread)", nb4, nbid4)
+	if nb3 != "" || nbid3 != "" {
+		t.Fatalf("page3 cursor = (%q, %q), want both empty (end-of-thread, no older replies after r1a)", nb3, nbid3)
 	}
 }
 
