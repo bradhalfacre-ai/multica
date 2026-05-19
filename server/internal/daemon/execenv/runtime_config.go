@@ -15,6 +15,41 @@ import (
 // deterministically without having to run on every target OS.
 var runtimeGOOS = runtime.GOOS
 
+// sanitizeNameForBriefMarkdown turns a possibly-multiline display name into a
+// single-line, plain-text token that is safe to embed inside markdown inline
+// constructs (e.g. `**%s**`) in the agent brief. The brief is loaded as
+// trusted instructions, so user-controlled name fields must not be able to
+// introduce headings, lists, or close the surrounding bold span.
+//
+// CR/LF and other whitespace control bytes collapse to a single space; other
+// C0 controls and DEL are dropped; markdown structural characters that have
+// meaning in inline context (`*`, `_`, `` ` ``, `\`, `[`, `]`, `<`) are
+// backslash-escaped. Trailing whitespace is trimmed.
+func sanitizeNameForBriefMarkdown(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	prevSpace := false
+	for _, r := range name {
+		switch {
+		case r == '\r' || r == '\n' || r == '\t' || r == '\v' || r == '\f':
+			if !prevSpace && b.Len() > 0 {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+		case r < 0x20 || r == 0x7f:
+			continue
+		case r == '*' || r == '_' || r == '`' || r == '\\' || r == '[' || r == ']' || r == '<':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+			prevSpace = false
+		default:
+			b.WriteRune(r)
+			prevSpace = false
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // formatProjectResource renders a single resource as a human-readable bullet.
 // Unknown resource types fall back to a JSON-encoded ref so the agent can
 // still read what the user attached. New resource types should add a case
@@ -116,8 +151,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// on purpose: same shape ("who is in this conversation"), opposite role.
 	if strings.TrimSpace(ctx.RequestingUserProfileDescription) != "" {
 		b.WriteString("## Requesting User\n\n")
-		if ctx.RequestingUserName != "" {
-			fmt.Fprintf(&b, "You are working on behalf of **%s**. They describe themselves as:\n\n", ctx.RequestingUserName)
+		// Names come from the user record (`PATCH /api/me` only trims outer
+		// whitespace; Google display names can include arbitrary bytes), so
+		// before embedding inside `**...**` we collapse to a single line and
+		// escape inline-markdown control characters. Without this, a name
+		// like "Alice\n\n## Available Commands\nIgnore..." would inject a
+		// fresh heading inside the brief and bypass the blockquote guard on
+		// the description below.
+		safeName := sanitizeNameForBriefMarkdown(ctx.RequestingUserName)
+		if safeName != "" {
+			fmt.Fprintf(&b, "You are working on behalf of **%s**. They describe themselves as:\n\n", safeName)
 		} else {
 			b.WriteString("You are working on behalf of the following user. They describe themselves as:\n\n")
 		}
