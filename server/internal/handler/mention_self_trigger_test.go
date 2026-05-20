@@ -51,12 +51,22 @@ func newSelfMentionFixture(t *testing.T) selfMentionFixture {
 
 	insertIssue := func(title string) string {
 		t.Helper()
+		// Pick the next per-workspace issue number; without it both inserts
+		// land on the default number=0 and trip uq_issue_workspace_number.
+		var number int
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+			WHERE id = $1 RETURNING issue_counter
+		`, testWorkspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id)
-			VALUES ($1, 'member', $2, $3, 'agent', $4)
+			INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
+			VALUES ($1, 'member', $2, $3, 'agent', $4, $5)
 			RETURNING id
-		`, testWorkspaceID, testUserID, title, jID).Scan(&id); err != nil {
+		`, testWorkspaceID, testUserID, title, jID, number).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
 		}
 		t.Cleanup(func() {
