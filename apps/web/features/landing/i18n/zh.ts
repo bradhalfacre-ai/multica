@@ -229,7 +229,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
           { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
-          { label: "\u6848\u4f8b", href: "/use-cases" },
+          { label: "\u6848\u4f8b", href: "/usecases" },
           { label: "更新日志", href: "/changelog" },
           { label: "下载", href: "/download" },
         ],

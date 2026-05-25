@@ -45,7 +45,7 @@ export function LandingHeader({
 
         <div className="flex items-center gap-2.5 sm:gap-3">
           <Link
-            href="/use-cases"
+            href="/usecases"
             className={cn(
               headerButtonClassName("ghost", variant),
               "hidden sm:inline-flex",

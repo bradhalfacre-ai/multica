@@ -6,13 +6,16 @@ import { cn } from "@multica/ui/lib/utils";
 import { LandingHeader } from "@/features/landing/components/landing-header";
 import { LandingFooter } from "@/features/landing/components/landing-footer";
 import { Screenshot } from "@/features/landing/components/mdx/screenshot";
-import { useCasesSource } from "@/lib/use-cases-source";
+import {
+  getUseCaseLangForLocale,
+  useCasesSource,
+} from "@/lib/use-cases-source";
 import {
   docsHrefForLocale,
   getUseCaseLocale,
   useCaseText,
 } from "@/lib/use-cases-i18n";
-import type { Locale } from "@/features/landing/i18n";
+import type { SupportedLocale } from "@multica/core/i18n";
 
 type Params = { slug: string };
 
@@ -23,7 +26,7 @@ export async function generateMetadata(props: {
 }): Promise<Metadata> {
   const { slug } = await props.params;
   const locale = await getUseCaseLocale();
-  const page = useCasesSource.getPage([slug], locale);
+  const page = useCasesSource.getPage([slug], getUseCaseLangForLocale(locale));
   if (!page) return {};
 
   return {
@@ -32,10 +35,10 @@ export async function generateMetadata(props: {
     openGraph: {
       title: page.data.title,
       description: page.data.description,
-      url: `/use-cases/${slug}`,
+      url: `/usecases/${slug}`,
     },
     alternates: {
-      canonical: `/use-cases/${slug}`,
+      canonical: `/usecases/${slug}`,
     },
   };
 }
@@ -97,7 +100,7 @@ const CTA_BLOCK_TRIGGER = new RegExp(`^\\[${CTA_SECONDARY_PREFIX}?CTA[::]`);
 const CTA_LABEL_STRIP = new RegExp(`^${CTA_SECONDARY_PREFIX}?CTA[::]\\s*`);
 const CTA_PRIMARY = /^CTA[::]/;
 
-function createSmartParagraph(locale: Locale) {
+function createSmartParagraph(locale: SupportedLocale) {
   const secondaryHref = docsHrefForLocale(locale);
   return function SmartParagraph(props: ComponentPropsWithoutRef<"p">) {
     const text = nodeToString(props.children).trim();
@@ -135,7 +138,7 @@ function createSmartParagraph(locale: Locale) {
   };
 }
 
-function createMdxComponents(locale: Locale) {
+function createMdxComponents(locale: SupportedLocale) {
   const SmartParagraph = createSmartParagraph(locale);
   return {
     Screenshot,
@@ -208,7 +211,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
   const { slug } = await props.params;
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
-  const page = useCasesSource.getPage([slug], locale);
+  const page = useCasesSource.getPage([slug], getUseCaseLangForLocale(locale));
   if (!page) notFound();
 
   const MDX = page.data.body;

@@ -3,7 +3,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { LandingHeader } from "@/features/landing/components/landing-header";
 import { LandingFooter } from "@/features/landing/components/landing-footer";
-import { useCasesSource } from "@/lib/use-cases-source";
+import {
+  getUseCaseLangForLocale,
+  useCasesSource,
+} from "@/lib/use-cases-source";
 import { getUseCaseLocale, useCaseText } from "@/lib/use-cases-i18n";
 
 type ExtraFrontmatter = {
@@ -21,10 +24,10 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: text.indexMetadataTitle,
       description: text.indexMetadataDescription,
-      url: "/use-cases",
+      url: "/usecases",
     },
     alternates: {
-      canonical: "/use-cases",
+      canonical: "/usecases",
     },
   };
 }
@@ -33,7 +36,7 @@ export default async function UseCasesIndexPage() {
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
   const pages = useCasesSource
-    .getPages(locale)
+    .getPages(getUseCaseLangForLocale(locale))
     .slice()
     .sort((a, b) => {
       // Sort descending by updated_at. Missing dates fall to the bottom by
@@ -68,11 +71,9 @@ export default async function UseCasesIndexPage() {
               const heroImage = extra.hero_image;
               const category = extra.category;
               // Construct the URL from the page slug rather than `page.url`.
-              // Fumadocs prefixes non-default-locale URLs (e.g. `/en/...`)
-              // but our route is `/use-cases/[slug]` without a `[lang]`
-              // segment — locale is resolved at request time via cookie, so
-              // both ZH and EN cards link to the same prefix-free path.
-              const href = `/use-cases/${page.slugs.join("/")}`;
+              // Fumadocs may prefix locale-specific URLs, but our public
+              // route stays prefix-free and resolves locale from the request.
+              const href = `/usecases/${page.slugs.join("/")}`;
 
               return (
                 <Link key={href} href={href} className="group flex flex-col">
