@@ -365,6 +365,14 @@ export function ManualCreatePanel({
     // duplicate content on every round-trip.
     setDraft({ title: "", description: "" });
     setLastMode("agent");
+    // Prefer the hydrated identifier from `parentIssue`, but fall back to the
+    // identifier the modal opener seeded on `data`. Without the fallback, a
+    // flip that happens before the issue detail query resolves drops the
+    // identifier and the agent chip renders as "Sub-issue of " with an empty
+    // tail. The UUID alone still wires the sub-issue relationship correctly;
+    // this only affects the display affordance.
+    const carryParentIdentifier =
+      parentIssue?.identifier ?? (data?.parent_issue_identifier as string | undefined);
     onSwitchMode?.({
       prompt,
       ...(assigneeId && assigneeType === "agent"
@@ -374,7 +382,7 @@ export function ManualCreatePanel({
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
-      ...(parentIssue?.identifier ? { parent_issue_identifier: parentIssue.identifier } : {}),
+      ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
   };
 

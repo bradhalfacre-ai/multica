@@ -570,7 +570,13 @@ describe("CreateIssueModal", () => {
   // the sub-issue intent set by openCreateSubIssue. The parent_issue_identifier
   // tags along so the agent panel can render a "Sub-issue of MUL-XX" chip
   // without an extra round-trip.
-  it("forwards parent_issue_id when switching to agent mode from a sub-issue entry", async () => {
+  //
+  // The identifier fallback matters here: the mocked issueDetailOptions
+  // resolves to null (parent query not hydrated), so without the
+  // `data.parent_issue_identifier` fallback the agent chip would render as
+  // "Sub-issue of " with an empty tail. The UUID alone still wires the
+  // sub-issue relationship correctly, but the visible affordance breaks.
+  it("forwards parent_issue_id and falls back to seeded identifier when switching to agent mode", async () => {
     const user = userEvent.setup();
     const onSwitchMode = vi.fn();
 
@@ -597,6 +603,7 @@ describe("CreateIssueModal", () => {
       expect.objectContaining({
         prompt: "Refactor auth",
         parent_issue_id: "parent-uuid-1",
+        parent_issue_identifier: "MUL-2534",
       }),
     );
   });
