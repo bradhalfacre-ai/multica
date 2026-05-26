@@ -51,7 +51,7 @@ export function SessionListItem({
         if (e.key === "Enter" && !isRenaming) onSelect();
       }}
       className={cn(
-        "group flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-default transition-colors",
+        "group flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 cursor-default transition-colors",
         isCurrent ? "bg-accent" : "hover:bg-accent/50",
         className,
       )}
@@ -76,10 +76,10 @@ export function SessionListItem({
           />
         ) : (
           <>
-            <div className="truncate text-sm">
+            <div className="truncate text-[13px]">
               {session.title?.trim() || t(($) => $.window.untitled)}
             </div>
-            <div className="truncate text-xs text-muted-foreground/70">
+            <div className="truncate text-xs text-muted-foreground/60">
               {formatTimeAgo(session.updated_at)}
             </div>
           </>
@@ -171,7 +171,7 @@ function SessionRenameInlineInput({
         }
       }}
       onBlur={() => onSubmit(value)}
-      className="w-full rounded-sm bg-background px-1 py-0.5 text-sm outline-none ring-1 ring-border focus-visible:ring-brand"
+      className="w-full rounded-md bg-background px-1.5 py-0.5 text-[13px] outline-none ring-1 ring-border/50 focus-visible:ring-brand"
     />
   );
 }

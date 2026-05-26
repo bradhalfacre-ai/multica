@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type { CSSProperties } from "react";
 import { Minimize2, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -130,114 +131,124 @@ export function ChatFullscreen({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex bg-sidebar">
-        {/* Left sidebar — session list */}
-        <div className="flex w-64 shrink-0 flex-col border-r">
-          <div className="flex items-center justify-between border-b px-3 py-2.5">
-            <span className="text-sm font-medium text-muted-foreground">
-              {t(($) => $.window.active_group)}
-            </span>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="rounded-full text-muted-foreground"
-                    onClick={onNewChat}
-                  />
-                }
-              >
-                <Plus />
-              </TooltipTrigger>
-              <TooltipContent side="right">
+      <div className="fixed inset-0 z-50 flex flex-col bg-sidebar">
+        {/* Drag region for Electron — browsers ignore WebkitAppRegion */}
+        <div
+          aria-hidden
+          className="h-12 shrink-0"
+          style={{ WebkitAppRegion: "drag" } as CSSProperties}
+        />
+
+        <div className="flex flex-1 min-h-0">
+          {/* Left sidebar — session list */}
+          <div className="flex w-64 shrink-0 flex-col">
+            <div className="flex items-center justify-between px-3 pb-2">
+              <span className="text-[13px] font-medium text-foreground">
                 {t(($) => $.window.new_chat_tooltip)}
-              </TooltipContent>
-            </Tooltip>
+              </span>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-md text-muted-foreground hover:text-foreground"
+                      onClick={onNewChat}
+                      style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
+                    />
+                  }
+                >
+                  <Plus className="size-4" />
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {t(($) => $.window.new_chat_tooltip)}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+              {[...active, ...archived].map((session) => (
+                <SessionListItem
+                  key={session.id}
+                  session={session}
+                  agent={agentById.get(session.agent_id) ?? null}
+                  isCurrent={session.id === activeSessionId}
+                  isRunning={inFlightSessionIds.has(session.id)}
+                  isRenaming={renamingId === session.id}
+                  formatTimeAgo={formatTimeAgo}
+                  onSelect={() => onSelectSession(session)}
+                  onStartRename={() => setRenamingId(session.id)}
+                  onSubmitRename={(value) => handleSubmitRename(session.id, value)}
+                  onCancelRename={() => setRenamingId(null)}
+                  onDelete={() => setPendingDelete(session)}
+                />
+              ))}
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
-            {[...active, ...archived].map((session) => (
-              <SessionListItem
-                key={session.id}
-                session={session}
-                agent={agentById.get(session.agent_id) ?? null}
-                isCurrent={session.id === activeSessionId}
-                isRunning={inFlightSessionIds.has(session.id)}
-                isRenaming={renamingId === session.id}
-                formatTimeAgo={formatTimeAgo}
-                onSelect={() => onSelectSession(session)}
-                onStartRename={() => setRenamingId(session.id)}
-                onSubmitRename={(value) => handleSubmitRename(session.id, value)}
-                onCancelRename={() => setRenamingId(null)}
-                onDelete={() => setPendingDelete(session)}
+
+          {/* Right content area */}
+          <div className="flex flex-1 flex-col min-w-0 bg-background rounded-tl-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[13px] font-medium truncate">{sessionTitle}</span>
+              </div>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={() => setFullscreen(false)}
+                    />
+                  }
+                >
+                  <Minimize2 />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {t(($) => $.window.restore_tooltip)}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
+            {/* Messages */}
+            {showSkeleton ? (
+              <ChatMessageSkeleton />
+            ) : hasMessages ? (
+              <ChatMessageList
+                messages={messages}
+                pendingTask={pendingTask}
+                availability={availability}
               />
-            ))}
-          </div>
-        </div>
+            ) : (
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm text-muted-foreground">
+                  {t(($) => $.empty_state.returning_subtitle)}
+                </p>
+              </div>
+            )}
 
-        {/* Right content area */}
-        <div className="flex flex-1 flex-col min-w-0">
-          {/* Header */}
-          <div className="flex items-center justify-between border-b px-4 py-2.5">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-sm font-medium truncate">{sessionTitle}</span>
-            </div>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground"
-                    onClick={() => setFullscreen(false)}
-                  />
-                }
-              >
-                <Minimize2 />
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {t(($) => $.window.restore_tooltip)}
-              </TooltipContent>
-            </Tooltip>
-          </div>
+            {/* Banners */}
+            {noAgent ? (
+              <NoAgentBanner />
+            ) : (
+              <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+            )}
 
-          {/* Messages */}
-          {showSkeleton ? (
-            <ChatMessageSkeleton />
-          ) : hasMessages ? (
-            <ChatMessageList
-              messages={messages}
-              pendingTask={pendingTask}
-              availability={availability}
+            {/* Input */}
+            <ChatInput
+              onSend={onSend}
+              onUploadFile={onUploadFile}
+              onStop={onStop}
+              isRunning={!!pendingTaskId}
+              disabled={isSessionArchived}
+              noAgent={noAgent}
+              agentName={activeAgent?.name}
+              topSlot={<ContextAnchorCard />}
+              leftAdornment={agentDropdown}
+              rightAdornment={contextAnchorButton}
             />
-          ) : (
-            <div className="flex flex-1 items-center justify-center">
-              <p className="text-sm text-muted-foreground">
-                {t(($) => $.empty_state.returning_subtitle)}
-              </p>
-            </div>
-          )}
-
-          {/* Banners */}
-          {noAgent ? (
-            <NoAgentBanner />
-          ) : (
-            <OfflineBanner agentName={activeAgent?.name} availability={availability} />
-          )}
-
-          {/* Input */}
-          <ChatInput
-            onSend={onSend}
-            onUploadFile={onUploadFile}
-            onStop={onStop}
-            isRunning={!!pendingTaskId}
-            disabled={isSessionArchived}
-            noAgent={noAgent}
-            agentName={activeAgent?.name}
-            topSlot={<ContextAnchorCard />}
-            leftAdornment={agentDropdown}
-            rightAdornment={contextAnchorButton}
-          />
+          </div>
         </div>
       </div>
 
