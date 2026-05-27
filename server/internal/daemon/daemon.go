@@ -619,13 +619,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Fetch all user workspaces from the API and register runtimes for any
-	// that exist. Zero workspaces is a valid state — a newly-signed-up user
-	// may start the daemon before creating their first workspace. The
-	// workspaceSyncLoop below polls every 30s and will register runtimes
-	// when a workspace appears, so the daemon stays useful as a long-lived
-	// background process rather than crashing at startup.
-	if err := d.syncWorkspacesFromAPI(ctx); err != nil {
+	// Renew the PAT before the first API call, then do the initial
+	// workspace sync. Both steps live in preflightAuth so the ordering
+	// invariant (renew first) is enforced at one site instead of
+	// scattered into Run, and tests can exercise the failure paths
+	// without the full Run setup.
+	if err := d.preflightAuth(ctx); err != nil {
 		return err
 	}
 
@@ -1033,11 +1032,33 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 // not push the token out of the renewal window.
 const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 
+// preflightAuth runs the two auth-sensitive startup steps in their
+// required order: a synchronous PAT renewal first, then the initial
+// workspace sync. The order matters — running tryRenewToken before any
+// other API call is what surfaces a user-actionable "run multica login"
+// WARN when the PAT is already revoked or expired. If we let the
+// workspace sync go first, its 401 would short-circuit Run before the
+// renewal loop's first tick ever fires, and the operator would see only
+// a generic auth failure in the workspace-sync log with no hint that
+// re-login is the fix.
+//
+// The renewal is best-effort: tryRenewToken logs and returns, never
+// propagating errors. preflightAuth's exit status is driven entirely by
+// the workspace sync — so a transient renewal failure (network blip,
+// 500) does not by itself block startup. A successful sync with zero
+// workspaces is fine: a newly-signed-up user may start the daemon
+// before creating their first workspace, and workspaceSyncLoop will
+// register runtimes once one appears.
+func (d *Daemon) preflightAuth(ctx context.Context) error {
+	d.tryRenewToken(ctx)
+	return d.syncWorkspacesFromAPI(ctx)
+}
+
 // tokenRenewalLoop keeps the daemon's PAT alive by periodically asking the
-// server to extend its expires_at in-place. The first call fires right at
-// startup so a daemon coming back online after a week of downtime gets a
-// fresh expiry before its next heartbeat could 401; the timer then settles
-// into the ~3-day cadence.
+// server to extend its expires_at in-place. The startup renewal happens
+// synchronously in preflightAuth so a daemon coming back online after a
+// week of downtime gets a fresh expiry before its next heartbeat could
+// 401; this loop owns the long-running ~3-day cadence after that.
 //
 // The server is authoritative on the renewal threshold (it sees expires_at;
 // we don't), so this loop is intentionally dumb: call, log, sleep, repeat.
@@ -1046,8 +1067,6 @@ const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 // user sees the same warning on every cycle until they fix it, rather than
 // silently exiting and forcing them to read scrollback to find the cause.
 func (d *Daemon) tokenRenewalLoop(ctx context.Context) {
-	d.tryRenewToken(ctx)
-
 	ticker := time.NewTicker(DefaultTokenRenewalInterval)
 	defer ticker.Stop()
 

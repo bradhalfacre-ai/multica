@@ -216,9 +216,15 @@ func (h *Handler) RenewCurrentPersonalAccessToken(w http.ResponseWriter, r *http
 	}
 
 	newExpiresAt := pgtype.Timestamptz{Time: now.Add(PATRenewExtension), Valid: true}
+	// Pass the renewal threshold as the CAS predicate: only update if the
+	// row's existing expires_at is still inside this window. After the
+	// first writer succeeds the row sits at now+90d, which is well past
+	// now+7d, so any concurrent renewer hits the WHERE and sees ErrNoRows.
+	renewThreshold := pgtype.Timestamptz{Time: now.Add(PATRenewThreshold), Valid: true}
 	updated, err := h.Queries.ExtendPersonalAccessTokenExpiry(r.Context(), db.ExtendPersonalAccessTokenExpiryParams{
-		ID:        pat.ID,
-		ExpiresAt: newExpiresAt,
+		ID:               pat.ID,
+		NewExpiresAt:     newExpiresAt,
+		RenewThresholdAt: renewThreshold,
 	})
 	switch {
 	case err == nil:

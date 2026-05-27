@@ -29,15 +29,20 @@ WHERE id = $1;
 -- name: ExtendPersonalAccessTokenExpiry :one
 -- In-place renew: only bumps expires_at when the token is still valid
 -- (not revoked, not already expired) AND the existing expires_at is
--- earlier than the requested new value. The WHERE clause makes
--- concurrent renews idempotent — the second writer sees the already-
--- extended row and the UPDATE matches zero rows (sqlc :one returns
--- pgx.ErrNoRows, which the caller treats as "already renewed").
+-- still inside the renewal threshold ($3, e.g. now + 7d). Phrasing the
+-- CAS this way — "is the row still renewable?" rather than "is the
+-- requested new expiry larger than the current one?" — makes concurrent
+-- renews idempotent: once writer A bumps expires_at past the threshold,
+-- writer B's UPDATE matches zero rows (sqlc :one returns pgx.ErrNoRows,
+-- which the caller treats as "already renewed"). A naive `expires_at <
+-- $2` would still match because two callers race-computing
+-- `$2 = now + 90d` produce strictly-different values and the second
+-- one's $2 is always greater than the row A just wrote.
 UPDATE personal_access_token
-SET expires_at = $2
-WHERE id = $1
+SET expires_at = sqlc.arg(new_expires_at)
+WHERE id = sqlc.arg(id)
   AND revoked = FALSE
   AND expires_at IS NOT NULL
   AND expires_at > now()
-  AND expires_at < $2
+  AND expires_at <= sqlc.arg(renew_threshold_at)
 RETURNING expires_at;

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -236,6 +237,84 @@ func TestRenewPAT_ConcurrentRenewIsIdempotent(t *testing.T) {
 	wantAround := time.Now().Add(PATRenewExtension)
 	if actual.Before(wantAround.Add(-time.Hour)) || actual.After(wantAround.Add(time.Hour)) {
 		t.Fatalf("expected expiry near %v, got %v", wantAround, actual)
+	}
+}
+
+// TestRenewPAT_ParallelRenewExtendsExactlyOnce locks in the SQL-level
+// idempotency that the MUL-2744 review flagged: when N callers race to
+// renew the same in-window PAT, the WHERE clause must ensure only one
+// UPDATE actually bumps the row. The previous condition (`expires_at < $2`)
+// silently let every caller win — each computed a slightly larger
+// `$2 = now + 90d`, so the second writer's $2 always exceeded the first
+// writer's row value and the UPDATE re-matched. Pinning the CAS to the
+// renewal threshold instead (`expires_at <= $3`) means after the first
+// writer pushes expires_at to now + 90d, all subsequent writers see a
+// row already past the threshold and the UPDATE matches zero rows.
+//
+// We verify the database side by counting how many times the row's
+// expires_at column was actually moved across N parallel calls.
+func TestRenewPAT_ParallelRenewExtendsExactlyOnce(t *testing.T) {
+	const concurrency = 8
+
+	// Token has 2 days remaining — comfortably inside the 7-day window so
+	// every caller passes the handler's threshold pre-check and all of
+	// them get a chance to fight at the SQL layer.
+	oldExpiry := time.Now().Add(2 * 24 * time.Hour)
+	raw, patID := insertTestPAT(t, oldExpiry)
+
+	type result struct {
+		code      int
+		expiresAt string
+		renewed   bool
+	}
+	results := make([]result, concurrency)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			w := httptest.NewRecorder()
+			testHandler.RenewCurrentPersonalAccessToken(w, newRenewRequest(raw))
+			var resp RenewPATResponse
+			_ = json.NewDecoder(w.Body).Decode(&resp)
+			results[i] = result{code: w.Code, expiresAt: resp.ExpiresAt, renewed: resp.Renewed}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	var winners int
+	var winnerExpiry string
+	for _, r := range results {
+		if r.code != http.StatusOK {
+			t.Fatalf("concurrent renew should never return non-200; got %d (renewed=%v expires_at=%q)", r.code, r.renewed, r.expiresAt)
+		}
+		if r.renewed {
+			winners++
+			winnerExpiry = r.expiresAt
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("expected exactly one caller to flip renewed=true; got %d winners across %d calls", winners, concurrency)
+	}
+
+	// All losing callers report the same already-extended expires_at, and
+	// the DB carries that same value. If the old (buggy) condition were
+	// still in place, several callers would have re-bumped the row to
+	// strictly-larger now+90d values and the final expiry would not match
+	// the first winner's response.
+	var finalExpiry time.Time
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT expires_at FROM personal_access_token WHERE id = $1`, parseUUID(patID),
+	).Scan(&finalExpiry); err != nil {
+		t.Fatalf("readback: %v", err)
+	}
+	finalAsString := timestampToString(pgtype.Timestamptz{Time: finalExpiry, Valid: true})
+	if winnerExpiry != "" && finalAsString != winnerExpiry {
+		t.Fatalf("DB expires_at must match the winner's response (no double-bump); db=%q winner=%q", finalAsString, winnerExpiry)
 	}
 }
 
