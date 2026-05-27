@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -65,13 +65,23 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { SortField, IssueGrouping, SwimlaneGrouping, ViewMode } from "@multica/core/issues/stores/view-store";
-import type { SavedView } from "@multica/core/types";
+import {
+  useIssuesScopeStore,
+  type IssuesScope,
+} from "@multica/core/issues/stores/issues-scope-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, SavedView } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useIssueViewStore } from "@multica/core/issues/stores/view-store";
+import {
+  useActiveViewStore,
+  deserializeViewFilters,
+  serializeViewFilters,
+  isViewDirty,
+} from "@multica/core/views";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
+import { ViewTabs } from "./view-tabs";
 
 // ---------------------------------------------------------------------------
 // HoverCheck — shadcn official pattern (PR #6862)
@@ -156,8 +166,6 @@ function useIssueCounts(allIssues: Issue[]) {
     return { status, priority, assignee, creator, noAssignee, project, noProject, label };
   }, [allIssues]);
 }
-
-// (scope config removed — views now drive the tabs)
 
 // ---------------------------------------------------------------------------
 // Actor sub-menu content (shared between Assignee and Creator)
@@ -494,17 +502,13 @@ function LabelSubContent({
 export function IssuesHeader({
   scopedIssues,
   allowGantt = false,
-  views,
-  activeViewId,
-  onSelectView,
 }: {
   scopedIssues: Issue[];
   allowGantt?: boolean;
-  views?: SavedView[];
-  activeViewId?: string | null;
-  onSelectView?: (id: string) => void;
 }) {
   const { t } = useT("issues");
+  const scope = useIssuesScopeStore((s) => s.scope);
+  const setScope = useIssuesScopeStore((s) => s.setScope);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useIssueViewStore(
     (s) => s.toggleAgentRunningFilter,
@@ -514,26 +518,79 @@ export function IssuesHeader({
     [scopedIssues],
   );
 
+  // --- View tabs integration ---
+  const activeViewId = useActiveViewStore((s) => s.issuesActiveViewId);
+  const setActiveView = useActiveViewStore((s) => s.setIssuesActiveView);
+
+  const statusFilters = useIssueViewStore((s) => s.statusFilters);
+  const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
+  const assigneeFilters = useIssueViewStore((s) => s.assigneeFilters);
+  const includeNoAssignee = useIssueViewStore((s) => s.includeNoAssignee);
+  const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
+  const projectFilters = useIssueViewStore((s) => s.projectFilters);
+  const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
+  const labelFilters = useIssueViewStore((s) => s.labelFilters);
+
+  const [savedView, setSavedView] = useState<SavedView | null>(null);
+
+  const isDirty = useMemo(() => {
+    if (!savedView) return false;
+    return isViewDirty(savedView, scope, {
+      statusFilters, priorityFilters, assigneeFilters, includeNoAssignee,
+      creatorFilters, projectFilters, includeNoProject, labelFilters,
+    });
+  }, [savedView, scope, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters]);
+
+  const handleViewSelect = useCallback(
+    (view: SavedView) => {
+      setActiveView(view.id);
+      setSavedView(view);
+      const deserialized = deserializeViewFilters(view);
+      setScope(deserialized.scope as IssuesScope);
+      const store = useIssueViewStore.getState();
+      store.clearFilters();
+      const f = deserialized.filters;
+      for (const s of f.statusFilters) store.toggleStatusFilter(s as IssueStatus);
+      for (const p of f.priorityFilters) store.togglePriorityFilter(p as IssuePriority);
+      for (const a of f.assigneeFilters) store.toggleAssigneeFilter(a);
+      if (f.includeNoAssignee) store.toggleNoAssignee();
+      for (const c of f.creatorFilters) store.toggleCreatorFilter(c);
+      for (const p of f.projectFilters) store.toggleProjectFilter(p);
+      if (f.includeNoProject) store.toggleNoProject();
+      for (const l of f.labelFilters) store.toggleLabelFilter(l);
+    },
+    [setActiveView, setScope],
+  );
+
+  const getCurrentFilters = useCallback(
+    () =>
+      serializeViewFilters(scope, {
+        statusFilters, priorityFilters, assigneeFilters, includeNoAssignee,
+        creatorFilters, projectFilters, includeNoProject, labelFilters,
+      }),
+    [scope, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters],
+  );
+
+  const labelOverrides = useMemo(
+    () => ({
+      All: t(($) => $.scope.all_label),
+      Members: t(($) => $.scope.members_label),
+      Agents: t(($) => $.scope.agents_label),
+    }),
+    [t],
+  );
+
   return (
     <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      {/* Left: view tabs */}
-      <div className="flex items-center gap-1">
-        {views?.map((v) => (
-          <Button
-            key={v.id}
-            variant="outline"
-            size="sm"
-            className={
-              activeViewId === v.id
-                ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                : "text-muted-foreground"
-            }
-            onClick={() => onSelectView?.(v.id)}
-          >
-            {v.name}
-          </Button>
-        ))}
-      </div>
+      <ViewTabs
+        page="issues"
+        activeViewId={activeViewId}
+        onViewSelect={handleViewSelect}
+        isDirty={isDirty}
+        onSave={() => setSavedView(null)}
+        getCurrentFilters={getCurrentFilters}
+        labelOverrides={labelOverrides}
+      />
 
       <div className="flex items-center gap-1">
         {agentRunningFilter && (
