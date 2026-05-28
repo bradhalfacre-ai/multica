@@ -183,7 +183,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		var sessionID string
 
 		// 1. Initialize handshake.
-		_, err := c.request(runCtx, "initialize", map[string]any{
+		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
 			"clientInfo": map[string]any{
 				"name":    "multica-agent-sdk",
@@ -198,6 +198,12 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			return
 		}
 
+		// Drop MCP entries whose remote transport the runtime didn't
+		// advertise. See the matching comment in hermes.go for the why —
+		// shipping an http/sse entry to a stdio-only runtime tanks the
+		// whole session/new.
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kimi", b.cfg.Logger)
+
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -205,9 +211,14 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		if opts.ResumeSessionID != "" {
+			// Per ACP Session Setup, session/resume accepts mcpServers and
+			// the runtime re-connects them as part of the resume. Without
+			// this, a resumed Kimi task lost access to MCP tools that a
+			// fresh task on the same agent would have.
 			result, err := c.request(runCtx, "session/resume", map[string]any{
-				"cwd":       cwd,
-				"sessionId": opts.ResumeSessionID,
+				"cwd":        cwd,
+				"sessionId":  opts.ResumeSessionID,
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
