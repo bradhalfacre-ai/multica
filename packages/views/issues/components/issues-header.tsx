@@ -14,6 +14,7 @@ import {
   FolderMinus,
   List,
   SignalHigh,
+  SlidersHorizontal,
   X,
   Tag,
   User,
@@ -534,10 +535,12 @@ export function IssuesHeader({
     agents: "agents_description",
   };
 
+  const scopeLabel = t(($) => $.scope[SCOPE_LABEL_KEY[scope]]);
+
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
+    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
       {/* Left: scope buttons */}
-      <div className="flex items-center gap-1">
+      <div className="hidden items-center gap-1 md:flex">
         {SCOPE_VALUES.map((s) => (
           <Tooltip key={s}>
             <TooltipTrigger
@@ -561,9 +564,33 @@ export function IssuesHeader({
         ))}
       </div>
 
-      <div className="flex items-center gap-1">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-0 gap-1 text-muted-foreground md:hidden"
+            >
+              <span className="truncate">{scopeLabel}</span>
+              <ChevronDown className="size-3 text-muted-foreground" />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="start" className="w-auto">
+          <DropdownMenuRadioGroup value={scope} onValueChange={(value) => setScope(value as IssuesScope)}>
+            {SCOPE_VALUES.map((s) => (
+              <DropdownMenuRadioItem key={s} value={s}>
+                {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <div className="flex min-w-0 items-center gap-1">
         {agentRunningFilter && (
-          <span className="mr-1 text-xs text-muted-foreground">
+          <span className="mr-1 hidden text-xs text-muted-foreground md:inline">
             {t(($) => $.agent_activity.filter_active_label)}
           </span>
         )}
@@ -651,6 +678,7 @@ export function IssueDisplayControls({
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
   const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
+  const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-3";
 
   return (
     <div className="flex items-center gap-1">
@@ -666,19 +694,24 @@ export function IssueDisplayControls({
                       size="sm"
                       className={
                         hasActiveFilters
-                          ? "gap-1 bg-brand text-white hover:bg-brand/90"
-                          : "gap-1 text-muted-foreground"
+                          ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:w-auto md:px-3"
+                          : controlButtonClass
                       }
                     >
                       <Filter className="size-3.5" />
-                      {hasActiveFilters
-                        ? t(($) => $.filters.active_count, { count: activeFilterCount })
-                        : t(($) => $.filters.tooltip)}
+                      <span className="hidden md:inline">
+                        {hasActiveFilters
+                          ? t(($) => $.filters.active_count, { count: activeFilterCount })
+                          : t(($) => $.filters.tooltip)}
+                      </span>
+                      {hasActiveFilters && (
+                        <span className="tabular-nums md:hidden">{activeFilterCount}</span>
+                      )}
                       {hasActiveFilters && (
                         <span
                           role="button"
                           tabIndex={-1}
-                          className="-mr-1 ml-0.5 rounded-sm p-0.5 hover:bg-white/20"
+                          className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); act.clearFilters(); }}
                           onPointerDown={(e) => e.stopPropagation()}
                         >
@@ -872,13 +905,15 @@ export function IssueDisplayControls({
               render={
                 <TooltipTrigger
                   render={
-                    <Button variant="outline" size="sm" className="gap-1 text-muted-foreground">
-                      {sortBy !== "position" && (
-                        sortDirection === "asc"
-                          ? <ArrowUp className="size-3.5" />
-                          : <ArrowDown className="size-3.5" />
+                    <Button variant="outline" size="sm" className={controlButtonClass}>
+                      {sortBy === "position" ? (
+                        <SlidersHorizontal className="size-3.5" />
+                      ) : sortDirection === "asc" ? (
+                        <ArrowUp className="size-3.5" />
+                      ) : (
+                        <ArrowDown className="size-3.5" />
                       )}
-                      {sortLabel}
+                      <span className="hidden md:inline">{sortLabel}</span>
                     </Button>
                   }
                 />
@@ -1035,7 +1070,7 @@ export function IssueDisplayControls({
                 render={
                   <TooltipTrigger
                     render={
-                      <Button variant="outline" size="sm" className="gap-1 text-muted-foreground">
+                      <Button variant="outline" size="sm" className={controlButtonClass}>
                         {viewMode === "board" ? (
                           <Columns3 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
@@ -1045,13 +1080,15 @@ export function IssueDisplayControls({
                         ) : (
                           <List className="size-3.5" />
                         )}
-                        {viewMode === "board"
-                          ? t(($) => $.view.board)
-                          : viewMode === "swimlane"
-                          ? t(($) => $.view.swimlane)
-                          : viewMode === "gantt" && allowGantt
-                          ? t(($) => $.view.gantt)
-                          : t(($) => $.view.list)}
+                        <span className="hidden md:inline">
+                          {viewMode === "board"
+                            ? t(($) => $.view.board)
+                            : viewMode === "swimlane"
+                            ? t(($) => $.view.swimlane)
+                            : viewMode === "gantt" && allowGantt
+                            ? t(($) => $.view.gantt)
+                            : t(($) => $.view.list)}
+                        </span>
                       </Button>
                     }
                   />

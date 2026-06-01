@@ -2,7 +2,15 @@
 
 import { useMemo } from "react";
 import { useStore } from "zustand";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
 import { myIssuesViewStore, type MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
@@ -26,10 +34,11 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
     () => new Set(allIssues.map((i) => i.id)),
     [allIssues],
   );
+  const scopeLabel = SCOPES.find((s) => s.value === scope)?.label ?? SCOPES[0]?.label;
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      <div className="flex items-center gap-1">
+    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
+      <div className="hidden items-center gap-1 md:flex">
         {SCOPES.map((s) => (
           <Tooltip key={s.value}>
             <TooltipTrigger
@@ -53,9 +62,36 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
         ))}
       </div>
 
-      <div className="flex items-center gap-1">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-0 gap-1 text-muted-foreground md:hidden"
+            >
+              <span className="truncate">{scopeLabel}</span>
+              <ChevronDown className="size-3 text-muted-foreground" />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="start" className="w-auto">
+          <DropdownMenuRadioGroup
+            value={scope}
+            onValueChange={(value) => act.setScope(value as MyIssuesScope)}
+          >
+            {SCOPES.map((s) => (
+              <DropdownMenuRadioItem key={s.value} value={s.value}>
+                {s.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <div className="flex min-w-0 items-center gap-1">
         {agentRunningFilter && (
-          <span className="mr-1 text-xs text-muted-foreground">
+          <span className="mr-1 hidden text-xs text-muted-foreground md:inline">
             {tIssues(($) => $.agent_activity.filter_active_label)}
           </span>
         )}
