@@ -1908,6 +1908,54 @@ func TestAddAgentSkillsRejectsMalformedSkillID(t *testing.T) {
 	}
 }
 
+func TestAddAgentSkillsRejectsCrossWorkspaceSkillID(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Add Cross Workspace Skill", nil)
+	foreignSkillID := insertHandlerTestSkillInForeignWorkspace(t, "add-cross-workspace", "foreign body")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
+		"skill_ids": []string{foreignSkillID},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.AddAgentSkills(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("AddAgentSkills: expected 404 for cross-workspace skill_id, got %d: %s", w.Code, w.Body.String())
+	}
+	assertAgentSkillRowCount(t, agentID, 0)
+}
+
+func insertHandlerTestSkillInForeignWorkspace(t *testing.T, namePrefix, content string) string {
+	t.Helper()
+	ctx := context.Background()
+	slug := "foreign-skill-" + strings.ToLower(strings.ReplaceAll(t.Name(), "_", "-"))
+
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, "Foreign Skill Workspace "+t.Name(), slug, "", "FSW").Scan(&workspaceID); err != nil {
+		t.Fatalf("insert foreign workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+
+	name := namePrefix + "-" + t.Name()
+	var skillID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
+		RETURNING id
+	`, workspaceID, name, "fixture", content, testUserID).Scan(&skillID); err != nil {
+		t.Fatalf("insert foreign skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM skill WHERE id = $1`, skillID)
+	})
+	return skillID
+}
+
 func assertSkillIDsPresent(t *testing.T, skills []SkillSummaryResponse, wantIDs ...string) {
 	t.Helper()
 	got := make(map[string]bool, len(skills))
