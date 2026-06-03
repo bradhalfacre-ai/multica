@@ -304,14 +304,26 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// re-dispatch to the same issue. allocateCollisionFreeSkillDir exists to
 	// dodge *user*-owned skill dirs (the local_directory flow), not our own
 	// prior writes, so we undo them via the prior manifest first and let the
-	// refresh below re-create each skill at its natural slug. CleanupSidecars
-	// only removes paths the prior manifest recorded and skips any directory
-	// the agent has since populated, so user/agent content is preserved. This
-	// also brings the standard providers in line with the Codex path, where
+	// refresh below re-create each skill at its natural slug. This also brings
+	// the standard providers in line with the Codex path, where
 	// hydrateCodexSkills already wipes its skills dir before re-hydrating.
+	//
+	// Two steps, in order:
+	//   1. removeReusedManagedSkillDirs reclaims the platform's own skill
+	//      directories even when a prior-run agent left a file inside one.
+	//      CleanupSidecars alone can't do this — it preserves any recorded dir
+	//      the agent populated (correct on the local_directory teardown path),
+	//      which would otherwise keep the canonical slug occupied and push the
+	//      refresh back to issue-review-multica.
+	//   2. CleanupSidecars rolls back the remaining sidecar files
+	//      (issue_context.md, project resources) and the manifest itself.
+	//
 	// No-op when RootDir is empty (legacy local_directory reuse, which the
 	// daemon skips anyway) or when no prior manifest exists (older build).
 	if env.RootDir != "" {
+		if err := removeReusedManagedSkillDirs(env.RootDir, skillsDirPath(params.WorkDir, params.Provider)); err != nil {
+			logger.Warn("execenv: reclaim managed skill dirs on reuse failed", "error", err)
+		}
 		if err := CleanupSidecars(env.RootDir); err != nil {
 			logger.Warn("execenv: roll back prior sidecars on reuse failed", "error", err)
 		}
