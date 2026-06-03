@@ -295,6 +295,28 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		logger:         logger,
 	}
 
+	// Roll back the previous dispatch's sidecar writes before refreshing.
+	// On reuse the workdir still holds the prior run's issue_context.md and
+	// skill directories; without clearing them first, writeSkillFiles sees
+	// its own earlier output occupying the canonical slug and falls back to
+	// a collision-free sibling (issue-review, issue-review-multica,
+	// issue-review-multica-2, …), accumulating a fresh duplicate on every
+	// re-dispatch to the same issue. allocateCollisionFreeSkillDir exists to
+	// dodge *user*-owned skill dirs (the local_directory flow), not our own
+	// prior writes, so we undo them via the prior manifest first and let the
+	// refresh below re-create each skill at its natural slug. CleanupSidecars
+	// only removes paths the prior manifest recorded and skips any directory
+	// the agent has since populated, so user/agent content is preserved. This
+	// also brings the standard providers in line with the Codex path, where
+	// hydrateCodexSkills already wipes its skills dir before re-hydrating.
+	// No-op when RootDir is empty (legacy local_directory reuse, which the
+	// daemon skips anyway) or when no prior manifest exists (older build).
+	if env.RootDir != "" {
+		if err := CleanupSidecars(env.RootDir); err != nil {
+			logger.Warn("execenv: roll back prior sidecars on reuse failed", "error", err)
+		}
+	}
+
 	// Refresh context files (issue_context.md, skills). Reuse tracks a
 	// fresh manifest under env.RootDir so a later CleanupSidecars sees
 	// the up-to-date list of writes (an old manifest from a prior run

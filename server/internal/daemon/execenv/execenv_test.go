@@ -512,6 +512,72 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 	}
 }
 
+// TestReuseRefreshesSkillsWithoutDuplicating is the regression guard for
+// GitHub #3684: re-dispatching the same agent on the same issue goes through
+// the Reuse path, which must refresh skills in place rather than pile up
+// collision-free duplicates (issue-review, issue-review-multica,
+// issue-review-multica-2, …). Reuse rolls back the prior dispatch's writes
+// via its sidecar manifest before re-writing, so each skill lands at its
+// natural slug on every dispatch instead of dodging its own prior output.
+func TestReuseRefreshesSkillsWithoutDuplicating(t *testing.T) {
+	t.Parallel()
+
+	workspacesRoot := t.TempDir()
+	task := TaskContextForEnv{
+		IssueID: "reuse-skill-dedup",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Issue Review", Content: "Review the issue."},
+		},
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-reuse-dedup",
+		TaskID:         "11112222-3333-4444-5555-666677778888",
+		Provider:       "claude",
+		Task:           task,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	skillsDir := filepath.Join(env.WorkDir, ".claude", "skills")
+
+	// Re-dispatch twice on the same persistent workdir.
+	for i := 0; i < 2; i++ {
+		if reused := Reuse(ReuseParams{
+			WorkDir:  env.WorkDir,
+			Provider: "claude",
+			Task:     task,
+		}, testLogger()); reused == nil {
+			t.Fatalf("Reuse #%d returned nil", i+1)
+		}
+	}
+
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		t.Fatalf("read skills dir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 || names[0] != "issue-review" {
+		t.Fatalf("after re-dispatch the skills dir = %v, want exactly [issue-review] with no -multica duplicates", names)
+	}
+
+	// The surviving skill keeps its natural slug in frontmatter, so the agent
+	// invokes `issue-review` and not a suffixed copy.
+	body, err := os.ReadFile(filepath.Join(skillsDir, "issue-review", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(body), "name: issue-review") {
+		t.Errorf("SKILL.md frontmatter should pin name: issue-review; got:\n%s", body)
+	}
+}
+
 func TestCleanupPreservesLogs(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
