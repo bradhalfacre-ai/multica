@@ -105,7 +105,7 @@ function NewHomeNav() {
               <Link
                 key={link.href}
                 href={link.href}
-                className="inline-flex h-9 items-center rounded-[9px] px-3 text-[13.5px] font-medium text-[#0a0d12]/62 transition-colors hover:bg-[#0a0d12]/[0.05] hover:text-[#0a0d12]"
+                className="inline-flex h-9 items-center rounded-[6px] px-3 text-[13.5px] font-medium text-[#0a0d12]/62 transition-colors hover:bg-[#0a0d12]/[0.05] hover:text-[#0a0d12]"
               >
                 {link.label}
               </Link>
@@ -134,7 +134,7 @@ function GitHubStars() {
       target="_blank"
       rel="noreferrer"
       aria-label={`Star Multica on GitHub — ${GITHUB_STAR_COUNT} stars`}
-      className="hidden items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-[13px] font-semibold text-[#0a0d12]/70 transition-colors hover:bg-[#0a0d12]/[0.05] hover:text-[#0a0d12] sm:inline-flex"
+      className="hidden items-center gap-2 rounded-[6px] px-2.5 py-1.5 text-[13px] font-semibold text-[#0a0d12]/70 transition-colors hover:bg-[#0a0d12]/[0.05] hover:text-[#0a0d12] sm:inline-flex"
     >
       <GitHubIcon className="size-[18px] text-[#0a0d12]" />
       <span className="inline-flex items-center gap-1">
@@ -218,7 +218,7 @@ function ValueCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-[24px] border border-[#0a0d12]/10 bg-[#0a0d12]/[0.025]">
+    <div className="overflow-hidden rounded-[6px] border border-[#0a0d12]/10 bg-[#0a0d12]/[0.025]">
       <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
         <div className="px-7 py-10 sm:px-10 sm:py-12 lg:py-16 lg:pr-2 lg:pl-12">
           <p className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-[#0a0d12]/40">
@@ -234,7 +234,7 @@ function ValueCard({
             the right; the card's overflow-hidden trims it at the right border.
             landing-demo scopes the brand override + scrollbar hiding. */}
         <div className="px-7 pb-10 sm:px-10 sm:pb-0 lg:py-10 lg:pr-0 lg:pl-0">
-          <div className="landing-demo w-max rounded-[14px] border border-[#0a0d12]/10 bg-white p-3 shadow-[0_1px_3px_rgba(10,13,18,0.04)] sm:p-4">
+          <div className="landing-demo w-max rounded-[6px] border border-[#0a0d12]/10 bg-white p-3 shadow-[0_1px_3px_rgba(10,13,18,0.04)] sm:p-4">
             {children}
           </div>
         </div>
@@ -290,7 +290,7 @@ function AgentTrackGroup({ ariaHidden = false }: { ariaHidden?: boolean }) {
       {SUPPORTED_AGENTS.map(({ key, name }) => (
         <li
           key={key}
-          className="group flex h-[84px] w-[172px] shrink-0 items-center justify-center gap-2.5 rounded-[8px] bg-[#0a0d12]/[0.03] text-[#0a0d12]/85"
+          className="group flex h-[84px] w-[172px] shrink-0 items-center justify-center gap-2.5 rounded-[6px] bg-[#0a0d12]/[0.03] text-[#0a0d12]/85"
         >
           {/* Grayscale by default; full brand color on hover of this card. */}
           <ProviderLogo
@@ -318,7 +318,7 @@ function ProductPreviewPlaceholder() {
     <div className="relative">
       <DemoLiveHint />
       <div
-        className="overflow-hidden rounded-[12px] border border-[#0a0d12]/12 bg-white"
+        className="overflow-hidden rounded-[6px] border border-[#0a0d12]/12 bg-white"
         style={{ height: DEMO_WINDOW_H }}
       >
         <div
@@ -377,7 +377,7 @@ function DemoLiveHint() {
 
 function navButton(tone: "solid" | "ghost") {
   return cn(
-    "inline-flex h-9 items-center justify-center rounded-[8px] px-3.5 text-[13.5px] font-semibold transition-colors",
+    "inline-flex h-9 items-center justify-center rounded-[6px] px-3.5 text-[13.5px] font-semibold transition-colors",
     tone === "solid"
       ? "bg-[#0a0d12] text-white hover:bg-[#0a0d12]/90"
       : "border border-[#0a0d12]/14 bg-white text-[#0a0d12] hover:bg-[#0a0d12]/[0.04]",
@@ -386,7 +386,7 @@ function navButton(tone: "solid" | "ghost") {
 
 function heroButton(tone: "solid" | "ghost") {
   return cn(
-    "inline-flex items-center justify-center gap-2 rounded-[8px] px-5 py-3 text-[14px] font-semibold transition-colors",
+    "inline-flex items-center justify-center gap-2 rounded-[6px] px-5 py-3 text-[14px] font-semibold transition-colors",
     tone === "solid"
       ? "bg-[#0a0d12] text-white hover:bg-[#0a0d12]/90"
       : "border border-[#0a0d12]/14 bg-white text-[#0a0d12] hover:bg-[#0a0d12]/[0.04]",

@@ -16,7 +16,7 @@ export function AgentsPanel() {
           return (
             <div
               key={a.id}
-              className="flex items-center gap-3 rounded-[10px] border border-[#0a0d12]/8 bg-white px-3.5 py-3"
+              className="flex items-center gap-3 rounded-[6px] border border-[#0a0d12]/8 bg-white px-3.5 py-3"
             >
               {a.avatar_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -52,7 +52,7 @@ export function SkillsPanel() {
         {SKILLS.map((s) => (
           <div
             key={s.name}
-            className="rounded-[10px] border border-[#0a0d12]/8 bg-white px-3.5 py-3"
+            className="rounded-[6px] border border-[#0a0d12]/8 bg-white px-3.5 py-3"
           >
             <div className="text-[14px] font-semibold text-[#0a0d12]">{s.name}</div>
             <div className="mt-0.5 text-[12.5px] leading-5 text-[#0a0d12]/55">
