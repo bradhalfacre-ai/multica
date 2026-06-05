@@ -25,14 +25,24 @@ const DemoBoard = dynamic(
   },
 );
 
-// Value #1's auto-playing board micro-demo. Client-only for the same reason as
-// DemoBoard (mock API singleton + browser-only providers).
+// The value-section micro-demos. Client-only — they auto-play with timers and
+// (for the board) use browser-only providers. Lazy-loaded so they never block
+// first paint. next/dynamic needs an inline object-literal options arg.
 const ValueBoardDemo = dynamic(
   () => import("./demo/value-board-demo").then((m) => m.ValueBoardDemo),
-  {
-    ssr: false,
-    loading: () => <div className="h-[360px]" />,
-  },
+  { ssr: false, loading: () => <div className="h-[360px]" /> },
+);
+const ValueDelegateDemo = dynamic(
+  () => import("./demo/value-delegate-demo").then((m) => m.ValueDelegateDemo),
+  { ssr: false, loading: () => <div className="h-[360px]" /> },
+);
+const ValueTranscriptDemo = dynamic(
+  () => import("./demo/value-transcript-demo").then((m) => m.ValueTranscriptDemo),
+  { ssr: false, loading: () => <div className="h-[360px]" /> },
+);
+const ValueSkillsDemo = dynamic(
+  () => import("./demo/value-skills-demo").then((m) => m.ValueSkillsDemo),
+  { ssr: false, loading: () => <div className="h-[360px]" /> },
 );
 
 // GitHub Invertocat (official mark). lucide-react dropped its brand icons, so we
@@ -181,59 +191,107 @@ function NewHomeHero() {
 }
 
 // The values section turns the hero's promise into concrete, watchable proof.
-// Each value is a self-contained bordered card: a short claim on the left, a
-// focused auto-playing micro-demo (real product components) on the right. The
-// card supplies its own border + tint (no section divider / background), and
-// its border is the boundary that clips the demo — so the demo bleeds to the
-// card edge, never past the browser edge. Value #1 ships first; #2–#4 follow.
+// Each value is a self-contained bordered card pairing a short claim with a
+// focused auto-playing micro-demo. The cards alternate sides (text/demo →
+// demo/text → …) so the eye zig-zags down the page. The card's border is the
+// boundary that clips the demo, so it bleeds to the card edge, not the browser.
+const VALUES = [
+  {
+    eyebrow: "Visibility",
+    title: "See every agent on one board",
+    description:
+      "Agent work used to scatter across terminals, chats, and scripts. Now every task — queued, running, in review, done — lives on one board you can watch in real time.",
+    demo: <ValueBoardDemo />,
+  },
+  {
+    eyebrow: "Delegation",
+    title: "Delegate to agents like teammates",
+    description:
+      "Hand work to an agent the way you would a teammate — assign it an issue or @mention it in a comment. It picks the task up, does the work, and reports back with a PR.",
+    demo: <ValueDelegateDemo />,
+  },
+  {
+    eyebrow: "Accountability",
+    title: "Every run is on the record",
+    description:
+      "Every run is captured end to end — the reasoning, the files it read, the commands it ran, the result. Reopen any run and see exactly what happened.",
+    demo: <ValueTranscriptDemo />,
+  },
+  {
+    eyebrow: "Leverage",
+    title: "Turn team knowledge into reusable skills",
+    description:
+      "Package a repeatable workflow once and any agent can run it — PR review, bug repro, release notes. Your team's know-how becomes muscle every agent shares.",
+    demo: <ValueSkillsDemo />,
+  },
+];
+
 function ValuesSection() {
   return (
-    <section id="features" className="py-16 sm:py-20">
-      <div className="mx-auto max-w-[1200px] px-5 sm:px-6 lg:px-8">
-        <ValueCard
-          eyebrow="Visibility"
-          title="See every agent on one board"
-          description="Agent work used to scatter across terminals, chats, and scripts. Now every task — queued, running, in review, done — lives on one board you can watch in real time."
-        >
-          <ValueBoardDemo />
-        </ValueCard>
+    <section id="features" className="py-14 sm:py-20">
+      <div className="mx-auto flex max-w-[1200px] flex-col gap-6 px-5 sm:gap-8 sm:px-6 lg:px-8">
+        {VALUES.map((v, i) => (
+          <ValueCard key={v.title} {...v} reverse={i % 2 === 1}>
+            {v.demo}
+          </ValueCard>
+        ))}
       </div>
     </section>
   );
 }
 
-// One value card: a tinted, bordered, rounded container. Text column on the
-// left (vertically centered); the live demo on the right at its real shared
-// zoom, bleeding to the card's right edge where the card's `overflow-hidden`
-// clips it — so the border, not the browser, is the boundary.
+// One value card: a tinted, bordered, rounded container. The text column and
+// the live demo swap sides based on `reverse`; the demo renders at its real
+// shared zoom and bleeds to the card's far edge, where the card's
+// `overflow-hidden` clips it — so the border, not the browser, is the boundary.
 function ValueCard({
   eyebrow,
   title,
   description,
+  reverse = false,
   children,
 }: {
   eyebrow: string;
   title: string;
   description: string;
+  reverse?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="overflow-hidden rounded-[6px] border border-[#0a0d12]/10 bg-[#0a0d12]/[0.025]">
-      <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
-        <div className="px-7 py-10 sm:px-10 sm:py-12 lg:py-16 lg:pr-2 lg:pl-12">
+      <div
+        className={cn(
+          "grid items-center gap-8",
+          reverse
+            ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]"
+            : "lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]",
+        )}
+      >
+        <div
+          className={cn(
+            "px-7 py-10 sm:px-10 sm:py-12 lg:py-16",
+            reverse ? "lg:order-2 lg:pl-2 lg:pr-12" : "lg:order-1 lg:pr-2 lg:pl-12",
+          )}
+        >
           <p className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-[#0a0d12]/40">
             {eyebrow}
           </p>
-          <h3 className="mt-2.5 text-[1.7rem] font-semibold leading-[1.1] tracking-[-0.02em] lg:whitespace-nowrap">
+          <h3 className="mt-2.5 text-[1.7rem] font-semibold leading-[1.12] tracking-[-0.02em]">
             {title}
           </h3>
           <p className="mt-3.5 text-[15px] leading-7 text-[#0a0d12]/55">{description}</p>
         </div>
 
-        {/* Demo shrinks to its own width (w-max) and overflows the 1fr track to
-            the right; the card's overflow-hidden trims it at the right border.
+        {/* Demo shrinks to its own width (w-max) and overflows the 1fr track
+            toward the card's far edge, where overflow-hidden trims it. On a
+            reversed card it sits on the left and bleeds left (justify-end).
             landing-demo scopes the brand override + scrollbar hiding. */}
-        <div className="px-7 pb-10 sm:px-10 sm:pb-0 lg:py-10 lg:pr-0 lg:pl-0">
+        <div
+          className={cn(
+            "px-7 pb-10 sm:px-10 sm:pb-0 lg:py-10",
+            reverse ? "lg:order-1 lg:flex lg:justify-end lg:pl-0" : "lg:order-2 lg:pr-0",
+          )}
+        >
           <div className="landing-demo w-max rounded-[6px] border border-[#0a0d12]/10 bg-white p-3 shadow-[0_1px_3px_rgba(10,13,18,0.04)] sm:p-4">
             {children}
           </div>

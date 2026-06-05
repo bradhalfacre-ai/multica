@@ -65,6 +65,32 @@
     }
 }
 
+/* "Agent is working" typing dots (value #2 delegate demo). */
+@keyframes newhome-typing {
+    0%,
+    60%,
+    100% {
+        opacity: 0.25;
+    }
+    30% {
+        opacity: 0.9;
+    }
+}
+.newhome-typing > span {
+    animation: newhome-typing 1.1s ease-in-out infinite;
+}
+.newhome-typing > span:nth-child(2) {
+    animation-delay: 0.18s;
+}
+.newhome-typing > span:nth-child(3) {
+    animation-delay: 0.36s;
+}
+@media (prefers-reduced-motion: reduce) {
+    .newhome-typing > span {
+        animation: none;
+    }
+}
+
 /* newhome "this is live, try it" hint: the arrow draws itself in once, then the
  * whole annotation gently floats to draw the eye. Respects reduced-motion. */
 @keyframes newhome-hint-bob {
