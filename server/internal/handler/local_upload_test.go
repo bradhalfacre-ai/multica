@@ -6,11 +6,47 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// dbAttachmentForLocalSign builds a synthetic db.Attachment row pointing
+// at a /uploads/ URL — used by the LocalStorage signed-URL test to drive
+// attachmentToResponse without going through a full upload round-trip.
+func dbAttachmentForLocalSign(t *testing.T, key string) db.Attachment {
+	t.Helper()
+	id, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("uuid.NewV7: %v", err)
+	}
+	wsUUID, err := uuid.Parse(testWorkspaceID)
+	if err != nil {
+		t.Fatalf("parse testWorkspaceID: %v", err)
+	}
+	uploaderUUID, err := uuid.Parse(testUserID)
+	if err != nil {
+		t.Fatalf("parse testUserID: %v", err)
+	}
+	return db.Attachment{
+		ID:           pgtype.UUID{Bytes: id, Valid: true},
+		WorkspaceID:  pgtype.UUID{Bytes: wsUUID, Valid: true},
+		UploaderType: "member",
+		UploaderID:   pgtype.UUID{Bytes: uploaderUUID, Valid: true},
+		Filename:     "x.png",
+		Url:          "/uploads/" + key,
+		ContentType:  "image/png",
+		SizeBytes:    4,
+		CreatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}
+}
 
 // TestIsUploadDenied is a pure-function check on the denylist used by
 // UploadFile. No DB / handler fixture required — runs in any environment.
@@ -372,5 +408,214 @@ func TestServeLocalUpload_UserPrefixAllowsAnyAuthedUser(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /uploads/users/*, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+
+// TestServeLocalUpload_SignedQueryBypassesAuth verifies the new auth path:
+// a request that carries valid ?exp=&sig= query params is served WITHOUT
+// any X-User-ID header. This is what unblocks token-auth clients (Desktop,
+// legacy-token Web, mobile) on inline <img>/<video> resource loads.
+func TestServeLocalUpload_SignedQueryBypassesAuth(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	key := "workspaces/" + testWorkspaceID + "/signed.png"
+	if _, err := local.Upload(context.Background(), key, []byte("signed-body"), "image/png", "x.png"); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	signed := storage.SignLocalUploadURL("/uploads/"+key, key, auth.JWTSecret(), time.Now().Add(5*time.Minute))
+	req := httptest.NewRequest(http.MethodGet, signed, nil)
+	// Deliberately NO X-User-ID — proves the signed query is the only
+	// authority.
+	rec := httptest.NewRecorder()
+	testHandler.ServeLocalUpload(local)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("signed URL: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "signed-body") {
+		t.Errorf("body did not match: %q", rec.Body.String())
+	}
+}
+
+// TestServeLocalUpload_SignedQueryRejectsExpired verifies that a signed URL
+// past its expiry is refused even on the legitimate route. Otherwise leaked
+// URLs would last forever.
+func TestServeLocalUpload_SignedQueryRejectsExpired(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	key := "workspaces/" + testWorkspaceID + "/expired.png"
+	if _, err := local.Upload(context.Background(), key, []byte("body"), "image/png", "x.png"); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	expired := storage.SignLocalUploadURL("/uploads/"+key, key, auth.JWTSecret(), time.Now().Add(-1*time.Minute))
+	req := httptest.NewRequest(http.MethodGet, expired, nil)
+	rec := httptest.NewRecorder()
+	testHandler.ServeLocalUpload(local)(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expired signed URL: expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestServeLocalUpload_SignedQueryRejectsTampered confirms that flipping
+// any byte in the signature breaks verification.
+func TestServeLocalUpload_SignedQueryRejectsTampered(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	key := "workspaces/" + testWorkspaceID + "/tampered.png"
+	if _, err := local.Upload(context.Background(), key, []byte("body"), "image/png", "x.png"); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	signed := storage.SignLocalUploadURL("/uploads/"+key, key, auth.JWTSecret(), time.Now().Add(5*time.Minute))
+	// Flip a byte in the sig parameter without renormalizing.
+	tampered := signed[:len(signed)-1] + "X"
+
+	req := httptest.NewRequest(http.MethodGet, tampered, nil)
+	rec := httptest.NewRecorder()
+	testHandler.ServeLocalUpload(local)(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("tampered signed URL: expected 401, got %d", rec.Code)
+	}
+}
+
+// TestServeLocalUpload_SignedQueryBoundToOneKey is the IDOR check: a sig
+// minted for key A must not authorize a request for key B even when both
+// belong to the same workspace.
+func TestServeLocalUpload_SignedQueryBoundToOneKey(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	keyA := "workspaces/" + testWorkspaceID + "/a.png"
+	keyB := "workspaces/" + testWorkspaceID + "/b.png"
+	if _, err := local.Upload(context.Background(), keyA, []byte("body-a"), "image/png", "a.png"); err != nil {
+		t.Fatalf("Upload a: %v", err)
+	}
+	if _, err := local.Upload(context.Background(), keyB, []byte("body-b"), "image/png", "b.png"); err != nil {
+		t.Fatalf("Upload b: %v", err)
+	}
+
+	// Sign for A, request B with A's signature.
+	signed := storage.SignLocalUploadURL("/uploads/"+keyA, keyA, auth.JWTSecret(), time.Now().Add(5*time.Minute))
+	parts := strings.SplitN(signed, "?", 2)
+	if len(parts) != 2 {
+		t.Fatalf("signed URL has no query: %s", signed)
+	}
+	bWithASig := "/uploads/" + keyB + "?" + parts[1]
+
+	req := httptest.NewRequest(http.MethodGet, bWithASig, nil)
+	rec := httptest.NewRecorder()
+	testHandler.ServeLocalUpload(local)(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("cross-key sig: expected 401, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "body-b") {
+		t.Errorf("body leaked: %q", rec.Body.String())
+	}
+}
+
+// TestServeLocalUpload_PartialSignedQueryFailsClosed: if exactly one of
+// exp or sig is present, the handler must reject rather than fall back to
+// "no signed query attempted."
+func TestServeLocalUpload_PartialSignedQueryFailsClosed(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	key := "workspaces/" + testWorkspaceID + "/partial.png"
+	if _, err := local.Upload(context.Background(), key, []byte("body"), "image/png", "x.png"); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	cases := []string{
+		"/uploads/" + key + "?exp=1700000000",
+		"/uploads/" + key + "?sig=AAAA",
+	}
+	for _, urlStr := range cases {
+		t.Run(urlStr, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, urlStr, nil)
+			// Note: NOT setting X-User-ID. The handler reads
+			// signed-query first; partial sig must fail-closed
+			// here, not fall through to "user is unauthenticated"
+			// which would also be 401 but for a different reason.
+			rec := httptest.NewRecorder()
+			testHandler.ServeLocalUpload(local)(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("partial signed query: expected 401, got %d", rec.Code)
+			}
+		})
+	}
+}
+
+// TestAttachmentToResponse_LocalStorageMintsSignedURL is the integration
+// check: when the storage backend is LocalStorage, the URL surfaced in
+// the JSON response carries valid exp/sig query params. Without this
+// every <img src=attachment.url> in token-auth clients would 401.
+func TestAttachmentToResponse_LocalStorageMintsSignedURL(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	origStorage := testHandler.Storage
+	testHandler.Storage = storage.NewLocalStorageFromEnv()
+	defer func() { testHandler.Storage = origStorage }()
+
+	// Build a synthetic Attachment row with a /uploads/ URL.
+	att := dbAttachmentForLocalSign(t, "workspaces/"+testWorkspaceID+"/abc.png")
+	resp := testHandler.attachmentToResponse(att)
+
+	if !strings.Contains(resp.URL, "exp=") || !strings.Contains(resp.URL, "sig=") {
+		t.Fatalf("LocalStorage URL did not carry signed-query params: %s", resp.URL)
+	}
+	u, err := url.Parse(resp.URL)
+	if err != nil {
+		t.Fatalf("parse resp.URL: %v", err)
+	}
+	exp, sig := storage.LocalUploadSignatureFromQuery(u.Query())
+	if !storage.VerifyLocalUploadSignature("workspaces/"+testWorkspaceID+"/abc.png", exp, sig, auth.JWTSecret(), time.Now()) {
+		t.Errorf("minted URL did not verify: %s", resp.URL)
 	}
 }

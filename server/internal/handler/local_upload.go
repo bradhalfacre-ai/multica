@@ -3,49 +3,81 @@ package handler
 import (
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 // ServeLocalUpload returns an http.HandlerFunc that authorizes a request for
-// /uploads/<key> and then delegates to the LocalStorage's ServeFile.
+// /uploads/<key> on the local-storage backend.
 //
-// The route is normally registered behind middleware.Auth, so by the time
-// this handler runs the caller already has a valid session/PAT and X-User-ID
-// is set. This handler enforces the second-layer access check: the user
-// must actually be entitled to read the bytes at the requested key.
+// Two acceptable auth paths:
 //
-// The key layout follows handler.UploadFile:
+//  1. Signed query string (?exp=&sig=) — minted by attachmentToResponse for
+//     LocalStorage and bound to one specific key with a short TTL.
+//     This is the only path that works for token-auth clients (Desktop,
+//     legacy-token Web sessions, native mobile) because browsers do not
+//     attach Authorization headers to native <img>/<video>/<iframe>
+//     resource loads. Mirror of the S3 + CloudFront presigned-URL flow.
+//     When valid, the request is served straight away — no further
+//     workspace membership lookup, the signature itself is the authority
+//     (the original metadata request that minted it already enforced
+//     membership).
 //
-//   - workspaces/{workspaceID}/{filename}  → requires membership in workspaceID
-//   - users/{userID}/{filename}            → requires the caller to be authenticated
-//     (any logged-in user; this path is used for avatars and similar
-//     user-scoped assets that can legitimately be referenced from
-//     other-workspace surfaces, e.g. the member list)
+//  2. Bearer / cookie via middleware.Auth — used for direct fetches from
+//     authenticated clients (server-side rendering, CLI, cookie-mode Web).
+//     middleware.Auth must be applied to the chain before this handler;
+//     here we rely on X-User-ID being set, then run the workspace /
+//     user-prefix membership check.
 //
-// Anything that doesn't match those two prefixes is rejected with 404 — we
-// don't want a future feature to accidentally drop content under
-// /uploads/<some-other-prefix>/ and inherit the relaxed policy.
+// Path layout follows handler.UploadFile:
 //
-// The disclosure (security-findings-2026-06-02) called out that /uploads/*
-// being unauthenticated was one of the layers that made the SVG-XSS chain
-// weaponizable end-to-end (directory listing leaked UUID filenames; this
-// handler cuts off both the listing and the unauthenticated read).
+//   - workspaces/{workspaceID}/{filename}  → membership-gated read
+//   - users/{userID}/{filename}            → any authenticated user
+//
+// Anything else is rejected with 404. The disclosure
+// (security-findings-2026-06-02) called out that /uploads/* being
+// unauthenticated was one of the layers that made the SVG-XSS chain
+// weaponizable end-to-end; this handler closes that gap while preserving
+// inline image rendering for token-auth clients via the signed-query path.
 func (h *Handler) ServeLocalUpload(local *storage.LocalStorage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := requireUserID(w, r)
-		if !ok {
+		key := strings.TrimPrefix(r.URL.Path, "/uploads/")
+		// Reject empty / directory-style paths up front. The storage
+		// layer will also catch this; rejecting here keeps the 404
+		// shape identical to the unrelated 404s on non-existent
+		// keys, denying the directory-existence oracle.
+		if key == "" || strings.HasSuffix(key, "/") {
+			http.NotFound(w, r)
 			return
 		}
 
-		key := strings.TrimPrefix(r.URL.Path, "/uploads/")
-		// Reject empty / directory-style paths up front. The storage
-		// layer will also catch this, but rejecting here means the
-		// 404 carries the same shape as the unrelated 404s on
-		// non-existent keys instead of leaking that the directory
-		// existed.
-		if key == "" || strings.HasSuffix(key, "/") {
-			http.NotFound(w, r)
+		// (1) Signed-query auth path. If the client included exp / sig
+		// query params, treat that as their chosen authentication
+		// method and fail closed if either is missing or invalid.
+		// We deliberately do NOT fall through to Bearer / cookie on a
+		// broken signature: a leaked URL with an expired sig should
+		// not silently start working again because the leaker also
+		// happens to be authenticated. The frontend should re-fetch
+		// the attachment metadata and get a fresh URL.
+		if exp, sig := storage.LocalUploadSignatureFromQuery(r.URL.Query()); exp != "" || sig != "" {
+			if exp == "" || sig == "" {
+				http.Error(w, `{"error":"missing exp or sig"}`, http.StatusUnauthorized)
+				return
+			}
+			if !storage.VerifyLocalUploadSignature(key, exp, sig, auth.JWTSecret(), time.Now()) {
+				http.Error(w, `{"error":"signed URL expired or invalid"}`, http.StatusUnauthorized)
+				return
+			}
+			local.ServeFile(w, r, key)
+			return
+		}
+
+		// (2) Bearer / cookie auth path. middleware.Auth has already
+		// stamped X-User-ID by the time we get here.
+		userID, ok := requireUserID(w, r)
+		if !ok {
 			return
 		}
 
@@ -70,10 +102,11 @@ func (h *Handler) ServeLocalUpload(local *storage.LocalStorage) http.HandlerFunc
 
 		case strings.HasPrefix(key, "users/"):
 			// Avatars and similar user-scoped assets. Any
-			// authenticated user can read these — they're routinely
-			// embedded in cross-workspace surfaces (member lists,
-			// inbox items, mention chips). The auth gate above is
-			// the access boundary; we don't gate on userID match.
+			// authenticated user can read these — they are
+			// routinely embedded in cross-workspace surfaces (member
+			// lists, inbox items, mention chips). The auth gate
+			// above is the access boundary; we don't gate on a
+			// userID match.
 
 		default:
 			// Unknown prefix — don't serve. New upload key shapes

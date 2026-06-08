@@ -451,17 +451,34 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// for non-media types, but the layered defenses here stay open until we
 	// add them.
 	//
-	// We register the route INSIDE its own middleware chain rather than
-	// using the broader r.Group(...) auth block above because:
-	//   1. The other Auth-protected routes are JSON-API; on auth failure
-	//      they emit a JSON error body. /uploads/* is a binary fetch
-	//      surface and the http.StatusUnauthorized that middleware.Auth
-	//      returns is fine here too.
-	//   2. The route closure needs the LocalStorage handle to call
-	//      ServeFile, and that handle is only available in this scope.
+	// Auth dispatch is two-track:
+	//   - Signed-query (?exp=&sig=): the route bypasses middleware.Auth and
+	//     ServeLocalUpload validates the HMAC signature itself. This is the
+	//     path used by token-auth clients (Desktop, legacy-token Web,
+	//     mobile) for inline <img>/<video>/<iframe> resource loads —
+	//     browsers do not attach Authorization headers to those, so a
+	//     server-side mediated short-lived signed URL is the only way to
+	//     keep them working after we authenticate /uploads/*. Mirror of
+	//     S3 + CloudFront's presigned-URL flow.
+	//   - Bearer / cookie: middleware.Auth runs first, then
+	//     ServeLocalUpload enforces workspace membership.
 	if local, ok := store.(*storage.LocalStorage); ok {
-		r.With(middleware.Auth(queries, patCache, cloudPATVerifier)).
-			Get("/uploads/*", h.ServeLocalUpload(local))
+		inner := h.ServeLocalUpload(local)
+		authed := middleware.Auth(queries, patCache, cloudPATVerifier)(inner)
+		r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
+			// If the request carries BOTH signed-query parameters,
+			// route it to the inner handler with no Auth wrapper —
+			// the signature itself is the authority. ServeLocalUpload
+			// fails the request closed if either is malformed or
+			// expired, so a partial signature is not a downgrade
+			// path to "no auth."
+			exp, sig := storage.LocalUploadSignatureFromQuery(r.URL.Query())
+			if exp != "" && sig != "" {
+				inner.ServeHTTP(w, r)
+				return
+			}
+			authed.ServeHTTP(w, r)
+		})
 	}
 
 	// Auth (public) — per-IP rate limiting.
