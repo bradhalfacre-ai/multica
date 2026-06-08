@@ -271,7 +271,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.18",
           date: "2026-06-08",
-          title: "Web 通知、エージェント用メモ、わかりやすい CLI エラー",
+          title: "Web 版通知と /note コマンド",
           changes: [],
           features: [
             "Web アプリでブラウザー標準の通知バナーを表示できるようになり、Multica がバックグラウンドでもワークスペースの動きに気づきやすくなりました。",

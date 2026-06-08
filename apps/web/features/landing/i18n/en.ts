@@ -295,7 +295,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.18",
         date: "2026-06-08",
-        title: "Web Notifications, Agent Notes, and Clearer CLI Errors",
+        title: "Web Notifications and /note Command",
         changes: [],
         features: [
           "The web app can now show native browser notification banners, making workspace activity easier to catch while Multica is in the background",

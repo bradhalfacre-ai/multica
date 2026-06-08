@@ -295,7 +295,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.18",
         date: "2026-06-08",
-        title: "网页通知、智能体备注和更清晰的命令行错误提示",
+        title: "网页版消息通知和 /note 指令",
         changes: [],
         features: [
           "网页端现在可以显示浏览器原生通知横幅，即使 Multica 在后台，也更容易及时看到工作区动态",

@@ -270,7 +270,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.18",
           date: "2026-06-08",
-          title: "웹 알림, 에이전트 메모, 더 쉬운 CLI 오류 안내",
+          title: "웹 알림과 /note 명령",
           changes: [],
           features: [
             "웹 앱에서 브라우저 기본 알림 배너를 표시할 수 있어 Multica가 백그라운드에 있어도 워크스페이스 활동을 더 쉽게 확인할 수 있습니다.",
