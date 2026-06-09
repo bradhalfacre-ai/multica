@@ -28,14 +28,16 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 
@@ -133,11 +135,14 @@ export function AttachmentList({
   onRemove?: (attachmentId: string) => void;
 }) {
   if (!attachments?.length) return null;
-  // Skip attachments whose URL is already referenced in the markdown content,
-  // and duplicates of the same file (same name/type/size) that are referenced.
+  // Skip attachments whose URL (stable or legacy) is already referenced
+  // in the markdown content, and duplicates of the same file (same
+  // name/type/size) that are referenced. The dual-shape match is the
+  // MUL-3130 follow-through — a comment can mix the new
+  // /api/attachments/<id>/download URL and the legacy att.url shape.
   const standalone = content
     ? attachments.filter((a) => {
-        if (content.includes(a.url)) return false;
+        if (contentReferencesAttachment(content, a)) return false;
         // Dedup: if another attachment with the same file identity is already
         // inline in the content, this is a duplicate upload — skip it.
         const hasSiblingInContent = attachments.some(
@@ -146,7 +151,7 @@ export function AttachmentList({
             other.filename === a.filename &&
             other.content_type === a.content_type &&
             other.size_bytes === a.size_bytes &&
-            content.includes(other.url),
+            contentReferencesAttachment(content, other),
         );
         if (hasSiblingInContent) return false;
         return true;
@@ -177,7 +182,7 @@ function collectActiveAttachmentIds(
 ): string[] {
   const ids = new Set<string>();
   for (const attachment of attachments) {
-    if (content.includes(attachment.url)) ids.add(attachment.id);
+    if (contentReferencesAttachment(content, attachment)) ids.add(attachment.id);
   }
   for (const id of retainedStandaloneIds ?? []) ids.add(id);
   return [...ids];
@@ -193,7 +198,7 @@ function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
   const content = entry.content ?? "";
   return new Set(
     (entry.attachments ?? [])
-      .filter((attachment) => !content.includes(attachment.url))
+      .filter((attachment) => !contentReferencesAttachment(content, attachment))
       .map((attachment) => attachment.id),
   );
 }
@@ -381,8 +386,9 @@ function CommentRow({
             />
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => {
-                copyMarkdown(entry.content ?? "");
-                toast.success(t(($) => $.comment.copied_toast));
+                void copyText(entry.content ?? "").then((ok) => {
+                  if (ok) toast.success(t(($) => $.comment.copied_toast));
+                });
               }}>
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
@@ -595,8 +601,9 @@ function CommentCardImpl({
                 />
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => {
-                    copyMarkdown(entry.content ?? "");
-                    toast.success(t(($) => $.comment.copied_toast));
+                    void copyText(entry.content ?? "").then((ok) => {
+                      if (ok) toast.success(t(($) => $.comment.copied_toast));
+                    });
                   }}>
                     <Copy className="h-3.5 w-3.5" />
                     {t(($) => $.comment.copy_action)}

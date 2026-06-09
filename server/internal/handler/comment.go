@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -1034,7 +1036,28 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// noteCommentPrefix marks a comment as a human-only note. A comment whose first
+// whitespace-delimited token is this prefix (case-insensitive) is stored like
+// any other comment but never triggers an agent.
+const noteCommentPrefix = "/note"
+
+// isNoteComment reports whether content opts out of agent triggering via the
+// reserved /note prefix. The prefix must be the comment's first token, so
+// "/note check expiry", "  /NOTE", and "/note" all match, while "/notes",
+// "/ note", and "see foo/note" do not.
+func isNoteComment(content string) bool {
+	trimmed := strings.TrimLeft(content, " \t\r\n")
+	firstToken := trimmed
+	if i := strings.IndexFunc(trimmed, unicode.IsSpace); i >= 0 {
+		firstToken = trimmed[:i]
+	}
+	return strings.EqualFold(firstToken, noteCommentPrefix)
+}
+
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID string, suppressAgentIDs []pgtype.UUID) {
+	if isNoteComment(comment.Content) {
+		return
+	}
 	triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID)
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
@@ -1099,6 +1122,10 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 }
 
 func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string) []commentAgentTrigger {
+	if isNoteComment(content) {
+		return nil
+	}
+
 	seen := make(map[string]struct{})
 	triggers := make([]commentAgentTrigger, 0, 2)
 	add := func(trigger commentAgentTrigger) {

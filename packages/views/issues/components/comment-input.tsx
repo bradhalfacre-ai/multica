@@ -1,15 +1,13 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { Maximize2, Minimize2 } from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -33,7 +31,6 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
   const [submitting, setSubmitting] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const triggerPreview = useCommentTriggerPreview({ issueId, content });
   // Attachments uploaded in this composer session. Drives both:
@@ -94,9 +91,12 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
-    // Only send attachment IDs for uploads still present in the content.
+    // Track every attachment whose stable download URL OR legacy
+    // storage URL is referenced in the markdown body. Both shapes
+    // can appear in the same comment during the MUL-3130 rollout —
+    // see contentReferencesAttachment for the rationale.
     const activeIds = pendingAttachments
-      .filter((a) => content.includes(a.url))
+      .filter((a) => contentReferencesAttachment(content, a))
       .map((a) => a.id);
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
@@ -122,10 +122,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   return (
     <div
       {...dropZoneProps}
-      className={cn(
-        "relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border",
-        isExpanded ? "h-[70vh]" : "max-h-56",
-      )}
+      className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
     >
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
         <ContentEditor
@@ -145,6 +142,8 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           debounceMs={100}
           currentIssueId={issueId}
           attachments={pendingAttachments}
+          enableSlashCommands
+          slashCommandMode="command"
         />
       </div>
       <div className="absolute bottom-1 left-2 right-28 min-w-0">
@@ -156,23 +155,6 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={() => {
-                  setIsExpanded((v) => !v);
-                  editorRef.current?.focus();
-                }}
-                className="rounded-sm p-1.5 text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-              >
-                {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              </button>
-            }
-          />
-          <TooltipContent side="top">{isExpanded ? t(($) => $.comment.collapse_tooltip) : t(($) => $.comment.expand_tooltip)}</TooltipContent>
-        </Tooltip>
         <FileUploadButton
           size="sm"
           multiple

@@ -55,7 +55,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
-import { AgentLiveCard } from "./agent-live-card";
+import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
@@ -1096,14 +1096,48 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
 
     const el = document.getElementById(`comment-${highlightCommentId}`);
-    if (!el) return;
+    const container = scrollContainerEl;
+    if (!el || !container) return;
 
     didHighlightRef.current = highlightCommentId;
-    el.scrollIntoView({ block: "center" });
+
+    // Center the target comment WITHIN its own scroll container by driving the
+    // container's scrollTop directly — never native scrollIntoView. Native
+    // scrollIntoView is spec'd to scroll EVERY scrollable ancestor: on a cold
+    // mount where the timeline is still growing (streaming agent), the inner
+    // scroller can't satisfy centering on its own, so the scroll propagates up
+    // and moves the desktop shell's `overflow:hidden` wrapper — shoving the
+    // whole page, header included, off the top with no scrollbar to recover,
+    // until a resize reflows it (#3929). Scoping the scroll to `container`
+    // keeps it contained; re-centering across frames lands the comment
+    // precisely once async heights (markdown, code highlight, streamed replies)
+    // settle, instead of leaning on the ancestor scroll the way native did.
+    let rafId = 0;
+    let frames = 0;
+    let last = -1;
+    const center = () => {
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      const target = Math.max(
+        0,
+        container.scrollTop + (e.top - c.top) - (container.clientHeight - e.height) / 2,
+      );
+      container.scrollTop = target;
+      // Content is still laying out → the centered offset keeps shifting; keep
+      // re-centering until it stabilizes (within 1px) or we hit ~0.5s of frames.
+      if (Math.abs(target - last) > 1 && ++frames < 30) {
+        last = target;
+        rafId = requestAnimationFrame(center);
+      }
+    };
+    rafId = requestAnimationFrame(center);
 
     setHighlightedId(highlightCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
-    return () => clearTimeout(fade);
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(fade);
+    };
   }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
@@ -1649,6 +1683,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           }
           actions={
             <>
+            {/* Live "agent is working" chip, leftmost in the right cluster so
+                it never overlaps the title (which truncates to make room).
+                It self-hides when no agent is active. */}
+            <IssueAgentHeaderChip issueId={id} />
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -1945,13 +1983,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
-            {/* Agent live output — sticky banner in the activity section,
-                keyed by issue id so switching issues remounts the card and
-                clears any in-flight task state from the previous issue.
-                The execution log itself (per-task timeline + past runs)
-                lives in the right panel via ExecutionLogSection — this
-                card is just a header-style "agent is working" anchor. */}
-            <AgentLiveCard key={id} issueId={id} />
+            {/* The "agent is working" live signal now lives in the header
+                (IssueAgentHeaderChip) so it stays in one fixed place and
+                doesn't compete with sticky banners in this content column.
+                The per-task timeline + past runs live in the right panel
+                via ExecutionLogSection. */}
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment

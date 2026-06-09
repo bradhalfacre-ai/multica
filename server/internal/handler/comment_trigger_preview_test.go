@@ -146,6 +146,21 @@ func TestCreateComment_SuppressUnknownAgentIDIsNoop(t *testing.T) {
 	}
 }
 
+func TestPreviewCommentTriggers_NoteReturnsNoAgents(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "Preview Note Agent", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "comment trigger note", "agent", agentID)
+	content := fmt.Sprintf("/note [@Agent](mention://agent/%s) human-only context", agentID)
+
+	preview := previewCommentTriggersForTest(t, issueID, map[string]any{"content": content})
+	if got := len(preview.Agents); got != 0 {
+		t.Fatalf("note preview agents = %d, want 0: %+v", got, preview.Agents)
+	}
+}
+
 func TestPreviewCommentTriggers_AssigneeAndSuppress(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

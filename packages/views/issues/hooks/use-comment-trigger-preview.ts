@@ -7,6 +7,7 @@ import type { CommentTriggerPreviewAgent } from "@multica/core/types";
 
 const COMMENT_TRIGGER_PREVIEW_DEBOUNCE_MS = 300;
 const MENTION_RE = /\[@?(.+?)\]\(mention:\/\/(member|agent|squad|issue|all)\/([0-9a-fA-F-]+|all)\)/g;
+const NOTE_COMMAND_RE = /^\/note(?:$|\s)/i;
 
 export type CommentTriggerPreviewStatus = "idle" | "loading" | "error";
 
@@ -15,8 +16,12 @@ export interface UseCommentTriggerPreviewResult {
   status: CommentTriggerPreviewStatus;
 }
 
+export function isNoteCommentDraft(content: string): boolean {
+  return NOTE_COMMAND_RE.test(content.replace(/^[ \t\r\n]+/, ""));
+}
+
 export function commentTriggerPreviewSignature(content: string): string {
-  if (!content.trim()) return "empty";
+  if (!content.trim() || isNoteCommentDraft(content)) return "empty";
 
   const seen = new Set<string>();
   const tokens: string[] = [];
@@ -72,12 +77,12 @@ export function useCommentTriggerPreview({
   const previewQuery = useQuery({
     queryKey: ["issues", "comment-trigger-preview", issueId, parentId ?? "", debouncedSignature],
     queryFn: () => api.previewCommentTriggers(issueId, contentRef.current, parentId),
-    enabled: debouncedSignature !== "empty",
+    enabled: signature !== "empty" && debouncedSignature !== "empty",
     retry: false,
     staleTime: Infinity,
   });
 
-  if (debouncedSignature === "empty") {
+  if (signature === "empty" || debouncedSignature === "empty") {
     return { agents: [], status: "idle" };
   }
 

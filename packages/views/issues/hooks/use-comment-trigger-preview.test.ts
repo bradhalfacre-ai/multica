@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@multica/core/api";
 import {
   commentTriggerPreviewSignature,
+  isNoteCommentDraft,
   useCommentTriggerPreview,
 } from "./use-comment-trigger-preview";
 
@@ -108,6 +109,22 @@ describe("useCommentTriggerPreview", () => {
 
     expect(previewCommentTriggers).toHaveBeenCalledTimes(2);
   });
+
+  it("does not preview note drafts", async () => {
+    const agentA = "00000000-0000-0000-0000-000000000001";
+    const { result } = renderHook(
+      () => useCommentTriggerPreview({
+        issueId: "issue-1",
+        content: `/note [@A](mention://agent/${agentA})`,
+      }),
+      { wrapper: createWrapper() },
+    );
+
+    await advancePreviewDebounce();
+
+    expect(result.current).toEqual({ agents: [], status: "idle" });
+    expect(previewCommentTriggers).not.toHaveBeenCalled();
+  });
 });
 
 describe("commentTriggerPreviewSignature", () => {
@@ -135,5 +152,24 @@ describe("commentTriggerPreviewSignature", () => {
     expect(commentTriggerPreviewSignature("[@all](mention://all/all)")).not.toBe(
       commentTriggerPreviewSignature("plain text"),
     );
+  });
+
+  it("treats note commands as empty", () => {
+    const agentA = "00000000-0000-0000-0000-000000000001";
+
+    expect(commentTriggerPreviewSignature(`/note [@A](mention://agent/${agentA})`)).toBe("empty");
+    expect(commentTriggerPreviewSignature(`  /NOTE\n[@A](mention://agent/${agentA})`)).toBe("empty");
+    expect(commentTriggerPreviewSignature(`/notes [@A](mention://agent/${agentA})`)).not.toBe("empty");
+    expect(commentTriggerPreviewSignature(`/ note [@A](mention://agent/${agentA})`)).not.toBe("empty");
+  });
+});
+
+describe("isNoteCommentDraft", () => {
+  it("matches the reserved note prefix only as the first token", () => {
+    expect(isNoteCommentDraft("/note")).toBe(true);
+    expect(isNoteCommentDraft(" \t/Note keep this human-only")).toBe(true);
+    expect(isNoteCommentDraft("/notes keep this routable")).toBe(false);
+    expect(isNoteCommentDraft("/ note keep this routable")).toBe(false);
+    expect(isNoteCommentDraft("please /note later")).toBe(false);
   });
 });

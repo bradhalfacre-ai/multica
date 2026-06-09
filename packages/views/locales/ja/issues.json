@@ -294,12 +294,11 @@
     }
   },
   "reply": {
-    "placeholder": "返信を残す...",
-    "expand_tooltip": "展開",
-    "collapse_tooltip": "折りたたむ"
+    "placeholder": "返信を残す..."
   },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",
+    "hover_header_queued_other": "待機中のエージェント {{count}} 件",
     "status_running": "作業中",
     "status_queued": "待機中",
     "chip_label": "作業中",
