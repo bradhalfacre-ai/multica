@@ -272,8 +272,6 @@
     "send_failed": "Failed to send comment",
     "send_reply_failed": "Failed to send reply",
     "delete_failed": "Failed to delete comment",
-    "reply_count_one": "{{count}} reply",
-    "reply_count_other": "{{count}} replies",
     "leave_comment_placeholder": "Leave a comment...",
     "send_tooltip": "Send",
     "trigger_source_issue_assignee": "assignee",
