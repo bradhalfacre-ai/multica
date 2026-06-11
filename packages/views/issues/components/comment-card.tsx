@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -83,16 +83,8 @@ function StickyHeaderShell({
 interface CommentCardProps {
   issueId: string;
   entry: TimelineEntry;
-  /**
-   * Flat list of every nested reply under this entry's thread root. The card no
-   * longer renders these replies inline; it only uses the stabilized slice for
-   * thread-level affordances such as delete warnings and reply counts.
-   */
-  replies: TimelineEntry[];
-  parentEntry?: TimelineEntry | null;
-  rootEntry?: TimelineEntry | null;
-  threadReplyCount?: number;
-  isResolution?: boolean;
+  /** Number of nested descendants that the backend will cascade-delete. */
+  descendantCount?: number;
   currentUserId?: string;
   /**
    * True when the current user is a workspace owner/admin and can therefore
@@ -108,14 +100,6 @@ interface CommentCardProps {
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
-  /**
-   * When non-null, the thread root is currently rendered as a resolved-but-
-   * expanded card. Pass a "Collapse" affordance into the header so the user
-   * can fold the thread back to the bar; the parent owns the session state.
-   */
-  onCollapseResolved?: () => void;
-  onJumpToComment?: (commentId: string) => void;
-  onViewThread?: (rootCommentId: string) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
 }
@@ -361,11 +345,7 @@ function useEditAttachmentState(
 function CommentCardImpl({
   issueId,
   entry,
-  replies,
-  parentEntry,
-  rootEntry,
-  threadReplyCount,
-  isResolution = false,
+  descendantCount = 0,
   currentUserId,
   canModerate = false,
   onReply,
@@ -373,9 +353,6 @@ function CommentCardImpl({
   onDelete,
   onToggleReaction,
   onResolveToggle,
-  onCollapseResolved,
-  onJumpToComment,
-  onViewThread,
   highlightedCommentId,
 }: CommentCardProps) {
   const { t } = useT("issues");
@@ -393,39 +370,23 @@ function CommentCardImpl({
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const replyCount = threadReplyCount ?? replies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
-  const hasReplies = replyCount > 0;
-  const parentName = parentEntry ? getActorName(parentEntry.actor_type, parentEntry.actor_id) : null;
-  const rootId = rootEntry?.id ?? parentEntry?.id ?? entry.id;
-  const isReply = !!parentEntry;
+  const hasReplies = descendantCount > 0;
 
   // Pin this comment's header to the timeline scroll parent while its body is
-  // open. A resolved-thread collapse affordance owns the same sticky slot, so
-  // skip the header stickiness when that button is present.
-  const stickyHeader = open && !onCollapseResolved;
+  // open.
+  const stickyHeader = open;
 
   return (
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
     // scroll container, so the sticky collapse affordances below resolve to the
     // timeline's scroll parent instead of this card. See PR #3623.
     <Card className={cn("!py-0 !gap-0 overflow-clip transition-colors duration-700", isHighlighted && "ring-2 ring-brand/50", isHighlighted && highlightedCommentBackgroundClass)}>
-      {onCollapseResolved && (
-        <button
-          type="button"
-          onClick={onCollapseResolved}
-          className="sticky top-0 z-20 flex w-full items-center gap-2.5 border-b border-border/50 bg-muted px-4 py-2.5 text-left text-sm text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground"
-          aria-label={t(($) => $.comment.resolve.collapse)}
-        >
-          <ListChevronsDownUp className="h-3.5 w-3.5" />
-          {t(($) => $.comment.resolve.collapse)}
-        </button>
-      )}
       <Collapsible open={open} onOpenChange={handleOpenChange}>
         {/* comment-section — the sticky header's containing block. It wraps only
             this comment's header + body, so the header releases after the
@@ -463,15 +424,9 @@ function CommentCardImpl({
                 {contentPreview}
               </span>
             )}
-            {!open && replyCount > 0 && (
-              <span className="shrink-0 text-xs text-muted-foreground">
-                {t(($) => $.comment.reply_count, { count: replyCount })}
-              </span>
-            )}
-
             {open && (
               <>
-                {isResolution && (
+                {entry.resolved_at && (
                   <span className="shrink-0 text-xs font-medium text-success">
                     {t(($) => $.comment.resolve.resolution_badge)}
                   </span>
@@ -485,7 +440,12 @@ function CommentCardImpl({
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      aria-label={t(($) => $.comment.actions_aria)}
+                    >
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   }
@@ -506,16 +466,12 @@ function CommentCardImpl({
                         {entry.resolved_at ? (
                           <>
                             <RotateCcw className="h-3.5 w-3.5" />
-                            {isReply
-                              ? t(($) => $.comment.resolve.unresolve_action)
-                              : t(($) => $.comment.resolve.unresolve_thread_action)}
+                            {t(($) => $.comment.resolve.unresolve_action)}
                           </>
                         ) : (
                           <>
                             <CheckCircle2 className="h-3.5 w-3.5" />
-                            {isReply
-                              ? t(($) => $.comment.resolve.resolve_with_comment_action)
-                              : t(($) => $.comment.resolve.resolve_thread_action)}
+                            {t(($) => $.comment.resolve.resolve_action)}
                           </>
                         )}
                       </DropdownMenuItem>
@@ -555,27 +511,6 @@ function CommentCardImpl({
 
         {/* Collapsible body */}
         <CollapsibleContent>
-          {parentEntry && parentName && (
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pb-1 pl-14 text-xs text-muted-foreground">
-              <span>{t(($) => $.comment.replying_to, { name: parentName })}</span>
-              <button
-                type="button"
-                className="font-medium transition-colors hover:text-foreground"
-                onClick={() => onJumpToComment?.(parentEntry.id)}
-              >
-                {t(($) => $.comment.jump_to_parent)}
-              </button>
-              <span aria-hidden>·</span>
-              <button
-                type="button"
-                className="font-medium transition-colors hover:text-foreground"
-                onClick={() => onViewThread?.(rootId)}
-              >
-                {t(($) => $.comment.view_thread)}
-              </button>
-            </div>
-          )}
-
           {/* Comment body */}
           <div className="px-4 pt-1 pb-3">
             {edit.editing ? (

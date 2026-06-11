@@ -1,6 +1,6 @@
 import { forwardRef, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -510,6 +510,15 @@ function renderIssueDetailWithHighlight(
   return { ...result, queryClient };
 }
 
+async function openDeleteDialogForComment(commentId: string) {
+  await waitFor(() => {
+    expect(document.getElementById(`comment-${commentId}`)).not.toBeNull();
+  });
+  const card = document.getElementById(`comment-${commentId}`)!;
+  fireEvent.click(within(card).getByRole("button", { name: "Comment actions" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -785,7 +794,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
-  it("renders replies in the main timeline by their own created_at", async () => {
+  it("renders replies in the main timeline by their own created_at without thread chrome", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       makeCommentEntry("comment-a", "A: async request started", "2026-01-16T00:00:00Z"),
       makeCommentEntry("comment-b", "B: independent update", "2026-01-16T00:30:00Z"),
@@ -807,87 +816,81 @@ describe("IssueDetail (shared)", () => {
       "C: later independent update",
       "D: late reply to A",
     ]);
-    expect(screen.getByText("Replying to Test User")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Jump to parent" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "View thread" })).toBeInTheDocument();
+    expect(screen.queryByText("Replying to Test User")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Jump to parent" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View thread" })).not.toBeInTheDocument();
     expect(document.querySelector("#comment-comment-a .sticky.top-0")).not.toBeNull();
     expect(document.querySelector("#comment-reply-d .sticky.top-0")).not.toBeNull();
   });
 
-  it("highlights the parent when a reply row jumps to its parent", async () => {
+  it("uses descendant subtree data for delete copy on root comments", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
-      makeCommentEntry("comment-a", "Parent comment", "2026-01-16T00:00:00Z"),
-      makeCommentEntry("reply-d", "Reply comment", "2026-01-16T00:10:00Z", {
-        parent_id: "comment-a",
+      makeCommentEntry("comment-root", "Root with replies", "2026-01-16T00:00:00Z"),
+      makeCommentEntry("reply-1", "First reply", "2026-01-16T00:10:00Z", {
+        parent_id: "comment-root",
+      }),
+      makeCommentEntry("reply-2", "Nested reply", "2026-01-16T00:20:00Z", {
+        parent_id: "reply-1",
       }),
     ]);
 
     renderIssueDetail();
 
-    const jump = await screen.findByRole("button", { name: "Jump to parent" });
-    fireEvent.click(jump);
+    await openDeleteDialogForComment("comment-root");
 
     await waitFor(() => {
       expect(
-        document.getElementById("comment-comment-a")?.querySelector(".ring-2"),
-      ).not.toBeNull();
+        screen.getByText("This comment and all its replies will be permanently deleted. This cannot be undone."),
+      ).toBeInTheDocument();
     });
   });
 
-  it("folds root-resolved threads behind a resolved bar until expanded", async () => {
+  it("does not show reply delete copy for leaf replies", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
-      makeCommentEntry("comment-root", "Resolved root", "2026-01-16T00:00:00Z", {
-        resolved_at: "2026-01-16T00:30:00Z",
-      }),
-      makeCommentEntry("reply-1", "Reply inside resolved thread", "2026-01-16T00:10:00Z", {
+      makeCommentEntry("comment-root", "Root with replies", "2026-01-16T00:00:00Z"),
+      makeCommentEntry("reply-leaf", "Leaf reply", "2026-01-16T00:10:00Z", {
         parent_id: "comment-root",
       }),
     ]);
 
     renderIssueDetail();
 
-    const bar = await screen.findByText("2 resolved comments from Test User");
-    expect(screen.queryByText("Resolved root")).not.toBeInTheDocument();
-    expect(screen.queryByText("Reply inside resolved thread")).not.toBeInTheDocument();
+    await openDeleteDialogForComment("reply-leaf");
 
-    fireEvent.click(bar);
+    await waitFor(() => {
+      expect(
+        screen.getByText("This comment will be permanently deleted. This cannot be undone."),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText("This comment and all its replies will be permanently deleted. This cannot be undone."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders resolved comments as regular flat timeline rows", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      makeCommentEntry("comment-root", "Resolved root", "2026-01-16T00:00:00Z", {
+        resolved_at: "2026-01-16T00:25:00Z",
+      }),
+      makeCommentEntry("reply-1", "Reply after resolved root", "2026-01-16T00:10:00Z", {
+        parent_id: "comment-root",
+      }),
+      makeCommentEntry("reply-2", "Resolved reply", "2026-01-16T00:20:00Z", {
+        parent_id: "comment-root",
+        resolved_at: "2026-01-16T00:25:00Z",
+      }),
+    ]);
+
+    renderIssueDetail();
 
     await waitFor(() => {
       expect(screen.getByText("Resolved root")).toBeInTheDocument();
     });
-    expect(screen.getByText("Reply inside resolved thread")).toBeInTheDocument();
-  });
-
-  it("folds non-resolution replies when a reply resolves the thread", async () => {
-    mockApiObj.listTimeline.mockResolvedValue([
-      makeCommentEntry("comment-root", "Thread root", "2026-01-16T00:00:00Z"),
-      makeCommentEntry("reply-1", "Earlier reply", "2026-01-16T00:10:00Z", {
-        parent_id: "comment-root",
-      }),
-      makeCommentEntry("reply-2", "Resolution reply", "2026-01-16T00:20:00Z", {
-        parent_id: "comment-root",
-        resolved_at: "2026-01-16T00:25:00Z",
-      }),
-      makeCommentEntry("reply-3", "Later reply", "2026-01-16T00:30:00Z", {
-        parent_id: "comment-root",
-      }),
-    ]);
-
-    renderIssueDetail();
-
-    const fold = await screen.findByText("2 comments from Test User");
-    expect(screen.getByText("Thread root")).toBeInTheDocument();
-    expect(screen.getByText("Resolution reply")).toBeInTheDocument();
-    expect(screen.getByText("Resolution")).toBeInTheDocument();
-    expect(screen.queryByText("Earlier reply")).not.toBeInTheDocument();
-    expect(screen.queryByText("Later reply")).not.toBeInTheDocument();
-
-    fireEvent.click(fold);
-
-    await waitFor(() => {
-      expect(screen.getByText("Earlier reply")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Later reply")).toBeInTheDocument();
+    expect(screen.getByText("Reply after resolved root")).toBeInTheDocument();
+    expect(screen.getByText("Resolved reply")).toBeInTheDocument();
+    expect(screen.getAllByText("Resolution")).toHaveLength(2);
+    expect(screen.queryByText("3 resolved comments from Test User")).not.toBeInTheDocument();
+    expect(screen.queryByText("1 comment from Test User")).not.toBeInTheDocument();
   });
 
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
@@ -1170,12 +1173,7 @@ describe("IssueDetail (shared)", () => {
       });
     });
 
-    it("auto-expands a folded resolved thread when deep-link target is a reply inside it", async () => {
-      // Seed a timeline where comment-3 is resolved (so it renders as a
-      // resolved-bar by default) and has a reply, reply-1, whose id is the
-      // deep-link target. The root-resolved fold hides the reply until the
-      // effect detects it, expands the thread, then on re-run scrolls to the
-      // reply's id="comment-reply-1" node.
+    it("scrolls directly to a reply inside a resolved subtree", async () => {
       const timelineWithResolvedThread: TimelineEntry[] = [
         ...mockTimeline,
         {
@@ -1213,8 +1211,6 @@ describe("IssueDetail (shared)", () => {
         </I18nProvider>,
       );
 
-      // After expansion, the reply must appear in the DOM as its own flat
-      // CommentCard and the deep-link effect must land on + highlight it.
       await waitFor(() => {
         expect(
           document.getElementById("comment-reply-1"),
