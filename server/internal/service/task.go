@@ -907,6 +907,7 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			"chat_session_id", util.UUIDToString(task.ChatSessionID),
 			"error", err,
 		)
+		return nil
 	}
 	return cancelled
 }
