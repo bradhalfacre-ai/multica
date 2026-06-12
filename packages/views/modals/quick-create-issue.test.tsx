@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
@@ -374,17 +374,18 @@ describe("AgentCreatePanel", () => {
       'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
     );
     await user.clear(editor);
-    await user.type(
-      editor,
-      "Create issue with !(/api/attachments/019ec09d-6222-722b-bdfa-427b105d80be/download)",
-    );
+    fireEvent.change(editor, {
+      target: {
+        value: "Create issue with ![image](/api/attachments/019ec09d-6222-722b-bdfa-427b105d80be/download)",
+      },
+    });
 
     await user.click(screen.getByRole("button", { name: /^Create \(/i }));
 
     await waitFor(() => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
         agent_id: "agent-1",
-        prompt: "Create issue with !(/api/attachments/019ec09d-6222-722b-bdfa-427b105d80be/download)",
+        prompt: "Create issue with ![image](/api/attachments/019ec09d-6222-722b-bdfa-427b105d80be/download)",
         project_id: undefined,
         parent_issue_id: undefined,
         attachment_ids: ["019ec09d-6222-722b-bdfa-427b105d80be"],
