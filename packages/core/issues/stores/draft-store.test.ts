@@ -11,6 +11,7 @@ const RESET_STATE = {
     assigneeId: undefined,
     startDate: null,
     dueDate: null,
+    attachments: [],
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
@@ -44,6 +45,36 @@ describe("issue draft store — last assignee", () => {
     const { draft } = useIssueDraftStore.getState();
     expect(draft.assigneeType).toBeUndefined();
     expect(draft.assigneeId).toBeUndefined();
+  });
+
+  it("clearDraft removes persisted draft attachments", () => {
+    const { setDraft, clearDraft } = useIssueDraftStore.getState();
+
+    setDraft({
+      title: "first",
+      attachments: [
+        {
+          id: "11111111-2222-3333-4444-555555555555",
+          workspace_id: "ws-1",
+          issue_id: null,
+          comment_id: null,
+          chat_session_id: null,
+          chat_message_id: null,
+          uploader_type: "member",
+          uploader_id: "alice",
+          filename: "shot.png",
+          url: "https://cdn.example.test/shot.png",
+          download_url: "https://cdn.example.test/shot.png",
+          markdown_url: "https://app.example.test/api/attachments/11111111-2222-3333-4444-555555555555/download",
+          content_type: "image/png",
+          size_bytes: 123,
+          created_at: "2026-06-12T00:00:00Z",
+        },
+      ],
+    });
+    clearDraft();
+
+    expect(useIssueDraftStore.getState().draft.attachments).toEqual([]);
   });
 
   it("setLastAssignee(undefined) lets the user opt back out of a default", () => {

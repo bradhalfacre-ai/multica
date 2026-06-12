@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueStatus, IssuePriority, IssueAssigneeType } from "../../types";
+import type { IssueStatus, IssuePriority, IssueAssigneeType, Attachment } from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
@@ -13,6 +13,7 @@ interface IssueDraft {
   assigneeId?: string;
   startDate: string | null;
   dueDate: string | null;
+  attachments: Attachment[];
 }
 
 const EMPTY_DRAFT: IssueDraft = {
@@ -24,6 +25,7 @@ const EMPTY_DRAFT: IssueDraft = {
   assigneeId: undefined,
   startDate: null,
   dueDate: null,
+  attachments: [],
 };
 
 interface IssueDraftStore {

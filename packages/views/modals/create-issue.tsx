@@ -19,6 +19,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import {
   DialogContent,
   DialogTitle,
@@ -146,13 +147,17 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
-  // File upload — collect attachment IDs so we can link them after issue creation.
-  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  const draftAttachments = draft.attachments ?? [];
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+      const currentAttachments =
+        useIssueDraftStore.getState().draft.attachments ?? [];
+      const attachments = currentAttachments.some((a) => a.id === result.id)
+        ? currentAttachments
+        : [...currentAttachments, result];
+      setDraft({ attachments });
     }
     return result;
   };
@@ -179,7 +184,6 @@ export function ManualCreatePanel({
     setProjectId(undefined);
     setParentIssueId(undefined);
     setChildIssues([]);
-    setAttachmentIds([]);
     setDraft({
       title: "",
       description: "",
@@ -189,6 +193,7 @@ export function ManualCreatePanel({
       assigneeId,
       startDate: null,
       dueDate: null,
+      attachments: [],
     });
     descEditorRef.current?.clearContent();
     setFormResetKey((key) => key + 1);
@@ -198,16 +203,20 @@ export function ManualCreatePanel({
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
+      const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
+      const activeAttachmentIds = draftAttachments
+        .filter((a) => contentReferencesAttachment(description ?? "", a))
+        .map((a) => a.id);
       const issue = await createIssueMutation.mutateAsync({
         title: title.trim(),
-        description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
+        description,
         status,
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
         project_id: projectId,
       });
@@ -482,6 +491,7 @@ export function ManualCreatePanel({
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
                 debounceMs={500}
+                attachments={draftAttachments}
               />
               {descDragOver && <FileDropOverlay />}
             </div>
