@@ -1,0 +1,201 @@
+{
+  "run_id": "run_20260616T173446957647Z",
+  "contract_id": "multica.c2-123.in-review-guard.act",
+  "contract_sha": "sha256:726f18d76b6ad9134b7c22445fd8ec45a318e746e7ec367a71f233a96ce51a26",
+  "current_phase": "checks",
+  "completed_phases": [],
+  "mode": "act",
+  "harness": "unassigned",
+  "model_class": "frontier",
+  "workspace": {
+    "repo_path": "/opt/forgepilot-runtime/forgepilot",
+    "worktree_path": "/opt/forgepilot-runtime/forgepilot/.forgepilot/worktrees/run_20260616T173446957647Z",
+    "branch": "unknown",
+    "commit_sha": "unknown"
+  },
+  "risk": {
+    "level": "high",
+    "complexity": "unspecified"
+  },
+  "agent_profile": {
+    "id": "unassigned",
+    "role": "custom",
+    "runtime": {
+      "type": "none",
+      "name": "unassigned"
+    },
+    "permissions": [],
+    "forbidden_tasks": [],
+    "source": "default"
+  },
+  "review_policy": {
+    "required_reviewers": [
+      "frontier_review",
+      "security_review",
+      "evidence_curator"
+    ],
+    "required_for_risk": [
+      "high"
+    ],
+    "blind_review": true,
+    "contrarian_review": false,
+    "max_review_cycles": 3,
+    "block_on_severities": [
+      "critical",
+      "high",
+      "medium"
+    ],
+    "source": "risk_default"
+  },
+  "handoff": {
+    "format": "markdown",
+    "required_fields": [
+      "completed_work",
+      "artifacts",
+      "decisions",
+      "open_questions",
+      "residual_risk",
+      "checks",
+      "approval_status",
+      "next_action"
+    ],
+    "emit_trace_section": true,
+    "source": "default"
+  },
+  "completion_evidence": {
+    "require_handoff_comment": true,
+    "require_check_pass": true,
+    "allow_policy_decision_for_skipped_checks": true,
+    "required_comment_fields": [
+      "run id",
+      "contract",
+      "mode",
+      "trace",
+      "checks",
+      "files proposed or changed",
+      "approval status",
+      "residual risks",
+      "next action"
+    ],
+    "required_run_artifacts": [
+      "trace.json"
+    ],
+    "metadata_keys": [
+      "forgepilot_required",
+      "forgepilot_run_id"
+    ],
+    "source": "default"
+  },
+  "phase_history": [
+    {
+      "phase": "run_policy",
+      "status": "initialized",
+      "reason": "contract validated and trace skeleton created"
+    },
+    {
+      "phase": "checks",
+      "status": "failed",
+      "reason": "bound check evidence persisted to runtime trace"
+    },
+    {
+      "phase": "checks",
+      "status": "failed",
+      "reason": "bound check evidence persisted to runtime trace"
+    },
+    {
+      "phase": "checks",
+      "status": "passed",
+      "reason": "bound check evidence persisted to runtime trace"
+    }
+  ],
+  "commands": [
+    {
+      "check_id": "targeted_handler_tests",
+      "command_ref": "go_handler_tests",
+      "status": "failed",
+      "exit_code": 127,
+      "duration_ms": 1
+    },
+    {
+      "check_id": "diff_whitespace",
+      "command_ref": "git_diff_check",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 302
+    },
+    {
+      "check_id": "targeted_handler_tests",
+      "command_ref": "go_handler_tests",
+      "status": "failed",
+      "exit_code": 127,
+      "duration_ms": 1
+    },
+    {
+      "check_id": "diff_whitespace",
+      "command_ref": "git_diff_check",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 302
+    },
+    {
+      "check_id": "targeted_handler_tests",
+      "command_ref": "go_handler_tests",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 61972
+    },
+    {
+      "check_id": "diff_whitespace",
+      "command_ref": "git_diff_check",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 10
+    }
+  ],
+  "checks": [
+    {
+      "check_id": "targeted_handler_tests",
+      "command_ref": "go_handler_tests",
+      "status": "failed",
+      "exit_code": 127,
+      "duration_ms": 1
+    },
+    {
+      "check_id": "diff_whitespace",
+      "command_ref": "git_diff_check",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 302
+    },
+    {
+      "check_id": "targeted_handler_tests",
+      "command_ref": "go_handler_tests",
+      "status": "failed",
+      "exit_code": 127,
+      "duration_ms": 1
+    },
+    {
+      "check_id": "diff_whitespace",
+      "command_ref": "git_diff_check",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 302
+    },
+    {
+      "check_id": "targeted_handler_tests",
+      "command_ref": "go_handler_tests",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 61972
+    },
+    {
+      "check_id": "diff_whitespace",
+      "command_ref": "git_diff_check",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 10
+    }
+  ],
+  "approvals": [],
+  "blockers": []
+}

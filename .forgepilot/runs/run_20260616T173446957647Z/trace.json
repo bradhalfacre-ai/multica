@@ -1,0 +1,222 @@
+{
+  "trace_id": "run_20260616T173446957647Z",
+  "run_id": "run_20260616T173446957647Z",
+  "parent_run_id": null,
+  "approval_id": null,
+  "contract_id": "multica.c2-123.in-review-guard.act",
+  "contract_sha": "sha256:726f18d76b6ad9134b7c22445fd8ec45a318e746e7ec367a71f233a96ce51a26",
+  "schema_version": "0.2",
+  "task_statement": "Implement ADR-0006 In Review transition enforcement in Multica issue status updates.",
+  "repository": {
+    "path": "/opt/forgepilot-runtime/forgepilot",
+    "commit_sha": "unknown",
+    "branch": "unknown",
+    "worktree_id": "run_20260616T173446957647Z",
+    "dirty_state": "clean"
+  },
+  "runner": {
+    "runner_id": "forgepilot.trace.new",
+    "isolation_mode": "worktree",
+    "container_image_digest": null,
+    "tool_versions": {
+      "forgepilot": "0.1.0"
+    }
+  },
+  "model": {
+    "provider": "self_hosted",
+    "model_id": "unassigned",
+    "gateway": "openai_compatible_local",
+    "external_provider_approved": false
+  },
+  "risk": {
+    "level": "high",
+    "complexity": "unspecified"
+  },
+  "agent_profile": {
+    "id": "unassigned",
+    "role": "custom",
+    "runtime": {
+      "type": "none",
+      "name": "unassigned"
+    },
+    "permissions": [],
+    "forbidden_tasks": [],
+    "source": "default"
+  },
+  "review_policy": {
+    "required_reviewers": [
+      "frontier_review",
+      "security_review",
+      "evidence_curator"
+    ],
+    "required_for_risk": [
+      "high"
+    ],
+    "blind_review": true,
+    "contrarian_review": false,
+    "max_review_cycles": 3,
+    "block_on_severities": [
+      "critical",
+      "high",
+      "medium"
+    ],
+    "source": "risk_default"
+  },
+  "handoff": {
+    "format": "markdown",
+    "required_fields": [
+      "completed_work",
+      "artifacts",
+      "decisions",
+      "open_questions",
+      "residual_risk",
+      "checks",
+      "approval_status",
+      "next_action"
+    ],
+    "emit_trace_section": true,
+    "source": "default",
+    "completed_work": [],
+    "artifacts": [],
+    "decisions": [],
+    "open_questions": [],
+    "residual_risk": []
+  },
+  "completion_evidence": {
+    "require_handoff_comment": true,
+    "require_check_pass": true,
+    "allow_policy_decision_for_skipped_checks": true,
+    "required_comment_fields": [
+      "run id",
+      "contract",
+      "mode",
+      "trace",
+      "checks",
+      "files proposed or changed",
+      "approval status",
+      "residual risks",
+      "next action"
+    ],
+    "required_run_artifacts": [
+      "trace.json"
+    ],
+    "metadata_keys": [
+      "forgepilot_required",
+      "forgepilot_run_id"
+    ],
+    "source": "default"
+  },
+  "context_loaded": [
+    {
+      "path": "AGENTS.md",
+      "classification": "required_context",
+      "instruction_source": true
+    }
+  ],
+  "assumptions": [
+    "Trace skeleton only; no agent work, checks, or file mutations have run.",
+    "Created at 2026-06-16T17:34:46.957647+00:00."
+  ],
+  "files_changed": [],
+  "commands_run": [
+    {
+      "command_ref": "go_handler_tests",
+      "executable": "go",
+      "args": [
+        "test",
+        "./internal/handler",
+        "-run",
+        "TestUpdateIssueInReviewGuard|TestSetIssueMetadataRejectsAgentAuthoredRepoVisibilityOverride"
+      ],
+      "exit_code": 0,
+      "duration_ms": 61972,
+      "status": "passed"
+    },
+    {
+      "command_ref": "git_diff_check",
+      "executable": "git",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "duration_ms": 10,
+      "status": "passed"
+    }
+  ],
+  "policy_decisions": [
+    {
+      "policy": "contract_validation",
+      "decision": "allowed",
+      "reason": "Contract passed active v0.2 schema and custom MVP policy checks."
+    }
+  ],
+  "approvals": [],
+  "route_decision": {
+    "route": "not_selected",
+    "reason": "No process or route phase has run yet.",
+    "requires_human_approval": false
+  },
+  "checks": [
+    {
+      "id": "targeted_handler_tests",
+      "command_ref": "go_handler_tests",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 61972
+    },
+    {
+      "id": "diff_whitespace",
+      "command_ref": "git_diff_check",
+      "status": "passed",
+      "exit_code": 0,
+      "duration_ms": 10
+    }
+  ],
+  "notifier_events": [
+    "run_20260616T173446957647Z:trace-new",
+    "run_20260616T173446957647Z:check-started:2026-06-16T17:34:56.975382+00:00",
+    "run_20260616T173446957647Z:check-completed:2026-06-16T17:34:56.975382+00:00",
+    "run_20260616T173446957647Z:audit-trace-updated:2026-06-16T17:34:56.975382+00:00",
+    "run_20260616T173446957647Z:check-started:2026-06-16T17:36:42.259330+00:00",
+    "run_20260616T173446957647Z:check-completed:2026-06-16T17:36:42.259330+00:00",
+    "run_20260616T173446957647Z:audit-trace-updated:2026-06-16T17:36:42.259330+00:00",
+    "run_20260616T173446957647Z:check-started:2026-06-16T18:09:50.576689+00:00",
+    "run_20260616T173446957647Z:check-completed:2026-06-16T18:09:50.576689+00:00",
+    "run_20260616T173446957647Z:audit-trace-updated:2026-06-16T18:09:50.576689+00:00"
+  ],
+  "artifacts": [
+    "pipeline-state.json",
+    "events.jsonl",
+    "trace.json",
+    "trace.md"
+  ],
+  "diff_summary": "No files were changed by trace skeleton creation.",
+  "risks_and_followups": [
+    "Run processors must update pipeline-state.json before and after each phase.",
+    "Checks remain not_run until an execution command records evidence.",
+    "Check evidence was bound into the canonical runtime trace.",
+    "Review failed checks before completion.",
+    "Bound checks are ready for human review."
+  ],
+  "human_correction": {
+    "required": false,
+    "categories": [],
+    "notes": ""
+  },
+  "score": {},
+  "verdict": {
+    "trusted_pattern": true,
+    "summary": "Bound checks passed."
+  },
+  "redaction": {
+    "payloads_stored": false,
+    "summary_policy": "redacted_minimum_necessary",
+    "hashing": "hmac_or_per_run_salt"
+  },
+  "integrity": {
+    "trace_hash": "sha256:23e850d9f3b16ba7da59aa465234ef282c9c66270d1d62523dc540d93c6e90af",
+    "signature": "unsigned:local-bound-check",
+    "signer": "forgepilot.check.bound"
+  }
+}

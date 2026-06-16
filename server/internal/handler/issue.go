@@ -2475,6 +2475,22 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	var inReviewGuard issueguard.InReviewGuardResult
+	if req.Status != nil {
+		guardMetadata := parseIssueMetadata(prevIssue.Metadata)
+		h.addForgePilotRequiredLabelSignal(r.Context(), prevIssue, guardMetadata)
+		inReviewGuard, err = issueguard.EvaluateInReviewTransition(prevIssue.Status, *req.Status, guardMetadata, actorType, time.Now().UTC())
+		if err != nil {
+			if errors.Is(err, issueguard.ErrRepoVisibilityOverrideRejected) {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
+
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
@@ -2502,9 +2518,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	prevDueDate := dateToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
-
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
@@ -2579,7 +2592,60 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 
+	if statusChanged && inReviewGuard.OverrideUsed {
+		h.auditRepoVisibilityOverride(r.Context(), issue, actorType, actorID, inReviewGuard)
+	}
+
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) addForgePilotRequiredLabelSignal(ctx context.Context, issue db.Issue, metadata map[string]any) {
+	if metadata["forgepilot_required"] != nil || metadata["source_writing"] != nil {
+		return
+	}
+	labels, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("repo visibility guard label lookup failed", "issue_id", uuidToString(issue.ID), "error", err)
+		return
+	}
+	for _, label := range labels {
+		if label.Name == "forgepilot:required" {
+			metadata["forgepilot_required"] = true
+			return
+		}
+	}
+}
+
+func (h *Handler) auditRepoVisibilityOverride(ctx context.Context, issue db.Issue, actorType, actorID string, guard issueguard.InReviewGuardResult) {
+	actorUUID, err := util.ParseUUID(actorID)
+	if err != nil {
+		slog.Warn("repo visibility override audit skipped: actor id is not a uuid", "issue_id", uuidToString(issue.ID), "actor_type", actorType, "actor_id", actorID)
+		return
+	}
+	details, err := json.Marshal(map[string]any{
+		"from_status":     "in_progress",
+		"to_status":       "in_review",
+		"override_actor":  guard.OverrideActor,
+		"override_reason": guard.OverrideReason,
+		"override_at":     guard.OverrideAt,
+	})
+	if err != nil {
+		slog.Warn("repo visibility override audit marshal failed", "issue_id", uuidToString(issue.ID), "error", err)
+		return
+	}
+	if _, err := h.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+		ActorType:   pgtype.Text{String: actorType, Valid: true},
+		ActorID:     actorUUID,
+		Action:      "repo_visibility_override_used",
+		Details:     details,
+	}); err != nil {
+		slog.Warn("repo visibility override audit failed", "issue_id", uuidToString(issue.ID), "error", err)
+	}
 }
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
