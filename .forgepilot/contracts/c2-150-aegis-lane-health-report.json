@@ -1,0 +1,63 @@
+{
+  "objective": {
+    "name": "C2-150 Aegis lane-health report",
+    "outcome": "Implement a v1 read-only CLI/report that computes the Aegis lane-health metrics from existing Multica data fields and redacted ForgePilot trace summaries.",
+    "deliverables": [
+      "Read-only lane-health report command over existing database fields with optional daemon /health snapshot input",
+      "Verdict model that separates v1 HEALTHY/UNHEALTHY drivers from context-only metrics",
+      "Redacted JSON output limited to IDs, enums, counts, timestamps, and durations",
+      "Focused tests proving C2-123-style UNHEALTHY and C2-142-style HEALTHY sample behavior"
+    ]
+  },
+  "guardrails": {
+    "allowed_paths": [
+      ".forgepilot/contracts/c2-150-aegis-lane-health-report.json",
+      ".forgepilot/contracts/c2-150-aegis-lane-health-report.yaml",
+      ".forgepilot/handoffs",
+      "server/cmd/lane_health_report",
+      "server/internal/lanehealth"
+    ],
+    "blocked_paths": [
+      ".git",
+      ".env",
+      ".env.*",
+      "*.pem",
+      "*.key",
+      "node_modules",
+      "apps",
+      "packages",
+      "deploy",
+      "server/migrations"
+    ],
+    "requires_tests": true,
+    "requires_human_review": true
+  },
+  "implementation_boundary": {
+    "may_build": [
+      "Standalone read-only backend report command under server/cmd",
+      "Small internal package for metric and verdict calculation",
+      "Direct SELECT queries against existing issue, agent_task_queue, agent_runtime, agent, activity_log, and issue metadata fields",
+      "Optional daemon /health JSON snapshot parsing with graceful unavailable state",
+      "Trace parsing limited to check names and PASS/FAIL-like status enums"
+    ],
+    "must_not_build": [
+      "Multica schema or migration changes",
+      "New API/server endpoint",
+      "Dashboard UI",
+      "New issue metadata convention",
+      "claim_capacity_state or claims_in_flight verdict logic",
+      "Raw issue titles, descriptions, comment bodies, prompts, secrets, credentials, PHI, raw FLT, raw logs, or free-text trace failure reasons in output"
+    ]
+  },
+  "success_checks": [
+    "python -m json.tool .forgepilot/contracts/c2-150-aegis-lane-health-report.json",
+    "forgepilot plan .forgepilot/contracts/c2-150-aegis-lane-health-report.json --workspace .",
+    "cd server && env GOMAXPROCS=2 GOCACHE=/tmp/c2-150-go-build-cache GOMODCACHE=/tmp/c2-150-go-mod-cache go test -p=1 ./internal/lanehealth ./cmd/lane_health_report",
+    "git diff --check"
+  ],
+  "notes": [
+    "Active v0.2 validation is attempted against the companion YAML contract, but the current Multica repo does not contain contracts/active/v0.2/schemas/agent-contract.schema.json.",
+    "The command is intentionally direct-report tooling, not an API feature.",
+    "Daemon active_task_count is live-only; when absent, output must mark daemon health unavailable and rely on persisted queue/runtime data."
+  ]
+}
