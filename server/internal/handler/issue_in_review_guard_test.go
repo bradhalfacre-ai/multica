@@ -149,6 +149,52 @@ func TestUpdateIssueInReviewGuardAcceptsMatchingAttestation(t *testing.T) {
 	}
 }
 
+func TestUpdateIssueRepoVisibilityGuardRejectsDoneWithoutAttestation(t *testing.T) {
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required": true,
+		"pinned_branch":       "agent/test",
+		"pinned_commit":       "abc123",
+	})
+
+	w := updateIssueStatusForGuard(t, issueID, newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "done",
+	}))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for missing done attestation, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "repo visibility attestation required") {
+		t.Fatalf("expected attestation error, got %s", w.Body.String())
+	}
+}
+
+func TestUpdateIssueRepoVisibilityGuardAcceptsDoneWithMatchingAttestation(t *testing.T) {
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required":         true,
+		"pinned_branch":               "agent/test",
+		"pinned_commit":               "abc123",
+		"repo_visibility_attestation": "passed",
+		"repo_visibility_branch":      "agent/test",
+		"repo_visibility_commit":      "abc123",
+		"repo_visibility_attested_at": time.Now().UTC().Format(time.RFC3339),
+	})
+
+	w := updateIssueStatusForGuard(t, issueID, newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "done",
+	}))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for matching done attestation, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp IssueResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "done" {
+		t.Fatalf("expected status done, got %q", resp.Status)
+	}
+}
+
 func TestUpdateIssueInReviewGuardRejectsStaleAttestation(t *testing.T) {
 	issueID := createInReviewGuardIssue(t, map[string]any{
 		"forgepilot_required":         true,
@@ -243,6 +289,43 @@ func TestUpdateIssueInReviewGuardAcceptsAuthorizedOverrideAndAudits(t *testing.T
 	}
 }
 
+func TestUpdateIssueRepoVisibilityGuardAcceptsAuthorizedOverrideToDoneAndAudits(t *testing.T) {
+	overrideAt := time.Now().UTC().Format(time.RFC3339)
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required":                 true,
+		"pinned_branch":                       "agent/test",
+		"pinned_commit":                       "abc123",
+		"repo_visibility_override":            "approved",
+		"repo_visibility_override_actor_type": "member",
+		"repo_visibility_override_actor_id":   testUserID,
+		"repo_visibility_override_reason":     "human verified remote branch and commit",
+		"repo_visibility_override_at":         overrideAt,
+	})
+
+	w := updateIssueStatusForGuard(t, issueID, newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "done",
+	}))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for authorized done override, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT COUNT(*)
+		FROM activity_log
+		WHERE issue_id = $1
+		  AND action = 'repo_visibility_override_used'
+		  AND details->>'to_status' = 'done'
+		  AND details->>'override_reason' = 'human verified remote branch and commit'
+	`, issueID).Scan(&count); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one done override audit row, got %d", count)
+	}
+}
+
 func TestUpdateIssueInReviewGuardRejectsOverrideActorMismatch(t *testing.T) {
 	overrideAt := time.Now().UTC().Format(time.RFC3339)
 	issueID := createInReviewGuardIssue(t, map[string]any{
@@ -330,6 +413,37 @@ func TestSetIssueMetadataRejectsAgentAuthoredRepoVisibilityAttestation(t *testin
 	}
 }
 
+func TestDeleteIssueMetadataRejectsAgentAuthoredRepoVisibilityEvidence(t *testing.T) {
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required":         true,
+		"repo_visibility_attestation": "passed",
+	})
+	agentID := createHandlerTestAgent(t, "repo-visibility-delete-agent", []byte(`{}`))
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+
+	req := newRequest("DELETE", "/api/issues/"+issueID+"/metadata/repo_visibility_attestation", nil)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	w := httptest.NewRecorder()
+	testHandler.DeleteIssueMetadataKey(w, withGuardURLParams(req, "id", issueID, "key", "repo_visibility_attestation"))
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for agent-deleted repo visibility attestation, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var present bool
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT metadata ? 'repo_visibility_attestation'
+		FROM issue
+		WHERE id = $1
+	`, issueID).Scan(&present); err != nil {
+		t.Fatalf("verify metadata key remains: %v", err)
+	}
+	if !present {
+		t.Fatalf("expected protected metadata key to remain after rejected delete")
+	}
+}
+
 func TestBatchUpdateIssuesInReviewGuardRejectsMissingAttestation(t *testing.T) {
 	issueID := createInReviewGuardIssue(t, map[string]any{
 		"forgepilot_required": true,
@@ -346,6 +460,33 @@ func TestBatchUpdateIssuesInReviewGuardRejectsMissingAttestation(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for batch missing attestation, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("load issue status: %v", err)
+	}
+	if status != "in_progress" {
+		t.Fatalf("expected batch rejection to leave status in_progress, got %q", status)
+	}
+}
+
+func TestBatchUpdateIssuesRepoVisibilityGuardRejectsDoneWithoutAttestation(t *testing.T) {
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required": true,
+		"pinned_branch":       "agent/test",
+		"pinned_commit":       "abc123",
+	})
+
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{issueID},
+		"updates":   map[string]any{"status": "done"},
+	})
+	w := httptest.NewRecorder()
+	testHandler.BatchUpdateIssues(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for batch done missing attestation, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var status string

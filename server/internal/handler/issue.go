@@ -2476,11 +2476,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	var inReviewGuard issueguard.InReviewGuardResult
+	var repoVisibilityGuard issueguard.InReviewGuardResult
 	if req.Status != nil {
-		inReviewGuard, err = h.evaluateInReviewTransition(r.Context(), prevIssue, *req.Status, actorType, actorID, time.Now().UTC())
+		repoVisibilityGuard, err = h.evaluateRepoVisibilityTransition(r.Context(), prevIssue, *req.Status, actorType, actorID, time.Now().UTC())
 		if err != nil {
-			writeInReviewGuardError(w, err)
+			writeRepoVisibilityGuardError(w, err)
 			return
 		}
 	}
@@ -2586,8 +2586,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 
-	if statusChanged && inReviewGuard.OverrideUsed {
-		h.auditRepoVisibilityOverride(r.Context(), issue, prevIssue.Status, actorType, actorID, inReviewGuard)
+	if statusChanged && repoVisibilityGuard.OverrideUsed {
+		h.auditRepoVisibilityOverride(r.Context(), issue, prevIssue.Status, issue.Status, actorType, actorID, repoVisibilityGuard)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2613,13 +2613,13 @@ func (h *Handler) addForgePilotRequiredLabelSignal(ctx context.Context, issue db
 	}
 }
 
-func (h *Handler) evaluateInReviewTransition(ctx context.Context, issue db.Issue, nextStatus, actorType, actorID string, now time.Time) (issueguard.InReviewGuardResult, error) {
+func (h *Handler) evaluateRepoVisibilityTransition(ctx context.Context, issue db.Issue, nextStatus, actorType, actorID string, now time.Time) (issueguard.InReviewGuardResult, error) {
 	guardMetadata := parseIssueMetadata(issue.Metadata)
 	h.addForgePilotRequiredLabelSignal(ctx, issue, guardMetadata)
-	return issueguard.EvaluateInReviewTransition(issue.Status, nextStatus, guardMetadata, actorType, actorID, now)
+	return issueguard.EvaluateRepoVisibilityTransition(issue.Status, nextStatus, guardMetadata, actorType, actorID, now)
 }
 
-func writeInReviewGuardError(w http.ResponseWriter, err error) {
+func writeRepoVisibilityGuardError(w http.ResponseWriter, err error) {
 	if errors.Is(err, issueguard.ErrRepoVisibilityOverrideRejected) {
 		writeError(w, http.StatusForbidden, err.Error())
 		return
@@ -2627,7 +2627,7 @@ func writeInReviewGuardError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusConflict, err.Error())
 }
 
-func (h *Handler) auditRepoVisibilityOverride(ctx context.Context, issue db.Issue, fromStatus, actorType, actorID string, guard issueguard.InReviewGuardResult) {
+func (h *Handler) auditRepoVisibilityOverride(ctx context.Context, issue db.Issue, fromStatus, toStatus, actorType, actorID string, guard issueguard.InReviewGuardResult) {
 	actorUUID, err := util.ParseUUID(actorID)
 	if err != nil {
 		slog.Warn("repo visibility override audit skipped: actor id is not a uuid", "issue_id", uuidToString(issue.ID), "actor_type", actorType, "actor_id", actorID)
@@ -2635,7 +2635,7 @@ func (h *Handler) auditRepoVisibilityOverride(ctx context.Context, issue db.Issu
 	}
 	details, err := json.Marshal(map[string]any{
 		"from_status":     fromStatus,
-		"to_status":       "in_review",
+		"to_status":       toStatus,
 		"override_actor":  guard.OverrideActor,
 		"override_reason": guard.OverrideReason,
 		"override_at":     guard.OverrideAt,
@@ -2941,7 +2941,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	inReviewGuards := map[string]issueguard.InReviewGuardResult{}
+	repoVisibilityGuards := map[string]issueguard.InReviewGuardResult{}
 	if req.Updates.Status != nil {
 		now := time.Now().UTC()
 		for _, issueID := range req.IssueIDs {
@@ -2956,13 +2956,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			guard, err := h.evaluateInReviewTransition(r.Context(), prevIssue, *req.Updates.Status, actorType, actorID, now)
+			guard, err := h.evaluateRepoVisibilityTransition(r.Context(), prevIssue, *req.Updates.Status, actorType, actorID, now)
 			if err != nil {
-				writeInReviewGuardError(w, err)
+				writeRepoVisibilityGuardError(w, err)
 				return
 			}
 			if guard.Required {
-				inReviewGuards[uuidToString(prevIssue.ID)] = guard
+				repoVisibilityGuards[uuidToString(prevIssue.ID)] = guard
 			}
 		}
 	}
@@ -3165,8 +3165,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if statusChanged {
-			if guard := inReviewGuards[uuidToString(prevIssue.ID)]; guard.OverrideUsed {
-				h.auditRepoVisibilityOverride(r.Context(), issue, prevIssue.Status, actorType, actorID, guard)
+			if guard := repoVisibilityGuards[uuidToString(prevIssue.ID)]; guard.OverrideUsed {
+				h.auditRepoVisibilityOverride(r.Context(), issue, prevIssue.Status, issue.Status, actorType, actorID, guard)
 			}
 		}
 

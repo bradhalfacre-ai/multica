@@ -32,7 +32,7 @@ var AgentProtectedMetadataKeys = map[string]struct{}{
 }
 
 var (
-	ErrRepoVisibilityAttestationRequired = errors.New("repo visibility attestation required before moving this issue to in_review")
+	ErrRepoVisibilityAttestationRequired = errors.New("repo visibility attestation required before moving this issue to in_review or done")
 	ErrRepoVisibilityOverrideRejected    = errors.New("repo visibility override is not authorized for this transition")
 )
 
@@ -45,7 +45,11 @@ type InReviewGuardResult struct {
 }
 
 func EvaluateInReviewTransition(prevStatus, nextStatus string, metadata map[string]any, actorType, actorID string, now time.Time) (InReviewGuardResult, error) {
-	if nextStatus != "in_review" || prevStatus == "in_review" {
+	return EvaluateRepoVisibilityTransition(prevStatus, nextStatus, metadata, actorType, actorID, now)
+}
+
+func EvaluateRepoVisibilityTransition(prevStatus, nextStatus string, metadata map[string]any, actorType, actorID string, now time.Time) (InReviewGuardResult, error) {
+	if !isGuardedRepoVisibilityTarget(nextStatus) || prevStatus == nextStatus {
 		return InReviewGuardResult{}, nil
 	}
 	if !metadataTruthy(metadata, "forgepilot_required") && !metadataTruthy(metadata, "source_writing") {
@@ -69,6 +73,10 @@ func EvaluateInReviewTransition(prevStatus, nextStatus string, metadata map[stri
 		return result, nil
 	}
 	return result, ErrRepoVisibilityAttestationRequired
+}
+
+func isGuardedRepoVisibilityTarget(status string) bool {
+	return status == "in_review" || status == "done"
 }
 
 func IsAgentProtectedMetadataKey(key string) bool {

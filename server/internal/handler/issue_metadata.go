@@ -220,6 +220,12 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, _ := h.resolveActor(r, userID, workspaceID)
+	if issueguard.IsAgentProtectedMetadataKey(key) && actorType == "agent" {
+		writeError(w, http.StatusForbidden, "agents cannot delete repo visibility evidence metadata")
+		return
+	}
 
 	updated, err := h.Queries.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
 		ID:          issue.ID,
@@ -236,7 +242,6 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	workspaceID := uuidToString(updated.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	metadata := parseIssueMetadata(updated.Metadata)
 	h.publish(protocol.EventIssueMetadataChanged, workspaceID, actorType, actorID, map[string]any{

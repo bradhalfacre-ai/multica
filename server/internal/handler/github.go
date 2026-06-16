@@ -1190,6 +1190,14 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 }
 
 func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
+	if guard, err := h.evaluateRepoVisibilityTransition(ctx, issue, "done", "system", "", time.Now().UTC()); err != nil {
+		slog.Warn("github: advance issue to done blocked by repo visibility guard", "issue_id", uuidToString(issue.ID), "err", err)
+		return
+	} else if guard.Required && guard.OverrideUsed {
+		slog.Warn("github: repo visibility override cannot be audited for GitHub auto-advance without an actor id", "issue_id", uuidToString(issue.ID))
+		return
+	}
+
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID:          issue.ID,
 		Status:      "done",

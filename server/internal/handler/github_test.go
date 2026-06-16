@@ -2051,6 +2051,99 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	}
 }
 
+func TestWebhook_MergedPR_GuardedIssueWithoutAttestation_DoesNotComplete(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "merge-guarded-no-attestation-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "PR-merge guarded " + time.Now().Format(time.RFC3339Nano),
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue guarded: %d %s", w.Code, w.Body.String())
+	}
+	var guarded IssueResponse
+	json.NewDecoder(w.Body).Decode(&guarded)
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue
+		SET metadata = jsonb_build_object(
+			'forgepilot_required', true,
+			'pinned_branch', 'agent/test',
+			'pinned_commit', 'abc123'
+		)
+		WHERE id = $1
+	`, guarded.ID); err != nil {
+		t.Fatalf("seed guarded metadata: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, guarded.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, guarded.ID)
+	})
+
+	const installationID int64 = 88990012
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "merge-guarded-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"action": "closed",
+		"pull_request": map[string]any{
+			"number":     4243,
+			"html_url":   "https://github.com/acme/widget/pull/4243",
+			"title":      "Fix " + guarded.Identifier,
+			"body":       "",
+			"state":      "closed",
+			"draft":      false,
+			"merged":     true,
+			"merged_at":  "2026-04-29T00:00:00Z",
+			"closed_at":  "2026-04-29T00:00:00Z",
+			"created_at": "2026-04-28T00:00:00Z",
+			"updated_at": "2026-04-29T00:00:00Z",
+			"head":       map[string]any{"ref": "fix/guarded"},
+			"user":       map[string]any{"login": "octocat", "avatar_url": ""},
+		},
+		"repository": map[string]any{
+			"name":  "widget",
+			"owner": map[string]any{"login": "acme"},
+		},
+		"installation": map[string]any{"id": installationID},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "pull_request")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	updated, err := testHandler.Queries.GetIssue(ctx, parseUUID(guarded.ID))
+	if err != nil {
+		t.Fatalf("GetIssue guarded: %v", err)
+	}
+	if updated.Status != "in_progress" {
+		t.Fatalf("expected guarded issue to remain in_progress without attestation, got %q", updated.Status)
+	}
+}
 
 // generateTestRSAKeyPEM mints an RSA-2048 key, returns its PKCS#1 PEM
 // encoding (the format GitHub hands operators when they create the App)

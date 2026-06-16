@@ -1,0 +1,208 @@
+agent_contract:
+  id: multica.c2-148.done-guard.act
+  spec_version: "0.2"
+  contract_version: "0.1.0"
+  type: code_change
+  description: Extend ADR-0006 repo visibility enforcement to guarded issue completion.
+  risk_level: high
+  sensitivity: internal
+  owner: Brad Halfacre
+
+run_policy:
+  execution_mode: act
+  default_action: deny
+  plan_to_act:
+    parent_run_required: false
+    approval_required_for_act: false
+  isolation:
+    mode: worktree
+    require_clean_worktree: false
+    branch_or_worktree_per_run: true
+  path_policy:
+    base: repo_root
+    pattern_semantics: gitignore_glob_forward_slash
+    default_read: deny
+    default_write: deny
+    deny_precedence: true
+    canonicalization:
+      normalize_relative_paths: true
+      resolve_symlinks: true
+      reject_repo_escape: true
+    case_sensitivity: host
+    symlink_policy: deny_escape
+    read_allow:
+      - AGENTS.md
+      - server/internal/handler/**
+      - server/internal/issueguard/**
+      - server/pkg/db/**
+      - .forgepilot/contracts/**
+    write_allow:
+      - server/internal/handler/**
+      - server/internal/issueguard/**
+      - .forgepilot/contracts/**
+    deny:
+      - .env
+      - .env.*
+      - node_modules/**
+  command_policy:
+    default: deny
+    allowed:
+      - id: go_handler_done_guard_tests
+        executable: env
+        args:
+          - GOCACHE=/tmp/c2-148-go-build-cache
+          - GOMODCACHE=/tmp/c2-148-go-mod-cache
+          - go
+          - test
+          - ./internal/handler
+          - -run
+          - TestUpdateIssueRepoVisibilityGuard|TestBatchUpdateIssuesRepoVisibilityGuard|TestWebhook_MergedPR_GuardedIssueWithoutAttestation_DoesNotComplete|TestDeleteIssueMetadataRejectsAgentAuthoredRepoVisibilityEvidence
+        shell: none
+        cwd: server
+        timeout_ms: 120000
+        env_policy: explicit_only
+        env: {}
+        writes_to: []
+        side_effects:
+          - filesystem_write
+        network_policy: none
+      - id: git_diff_check
+        executable: git
+        args:
+          - diff
+          - --check
+        shell: none
+        cwd: repo_root
+        timeout_ms: 30000
+        env_policy: none
+        env: {}
+        writes_to: []
+        side_effects:
+          - none
+        network_policy: none
+    denied_patterns:
+      - git reset --hard
+      - git checkout --
+      - rm -rf
+      - curl *|*sh
+  mcp_policy:
+    default: deny
+    trusted_servers: []
+  model_policy:
+    default: deny_external
+    allowed_providers:
+      - self_hosted
+    allowed_gateways:
+      - openai_compatible_local
+    sensitive_context_allowed: false
+    max_context_classification: internal
+  approval_policy:
+    default: require_explicit_approval
+    separation_of_duties: true
+    approvers:
+      - Brad Halfacre
+    requires_human_approval:
+      - auth_changes
+      - secret_handling_changes
+      - deployment_changes
+
+observe:
+  enabled: true
+  redact_payloads: true
+  event_schema: contracts/active/v0.2/schemas/notifier-event.schema.json
+  notifiers:
+    - id: runtime-flow
+      hooks:
+        - on_policy_decision
+        - on_check_started
+        - on_check_completed
+        - on_audit_trace_written
+      sinks:
+        - task_trace
+  visualization:
+    enabled: true
+    source: runtime_events
+    success_flow: green
+    error_flow: red
+    neutral_flow: gray
+    stale_docs_policy: disallow
+
+consume:
+  required_context:
+    - AGENTS.md
+  read_paths:
+    - server/internal/handler/**
+    - server/internal/issueguard/**
+    - server/pkg/db/**
+  instruction_sources:
+    - AGENTS.md
+  task_inputs:
+    - user_request
+    - issue_context
+  external_docs: []
+  missing_context_behavior: stop
+
+process:
+  mode: implementation
+  invariants:
+    - preserve_unrelated_work
+    - keep_changes_surgical
+    - no_secret_or_env_commits
+    - deny_overrides_allow
+  checks:
+    - id: targeted_handler_done_guard_tests
+      type: unit
+      command_ref: go_handler_done_guard_tests
+      required: true
+      phase_allowed: act
+    - id: diff_whitespace
+      type: custom
+      command_ref: git_diff_check
+      required: true
+      phase_allowed: act
+  output_contract:
+    final_response:
+      - files_changed
+      - checks_run
+      - checks_not_run
+      - residual_risk
+      - approval_status
+  stop_conditions:
+    - denied_path_requested
+    - unapproved_command_required
+    - secrets_required
+
+route:
+  on_success:
+    - summarize_diff
+    - write_task_trace
+  on_failure:
+    - report_blocker
+    - write_task_trace
+  on_ambiguity:
+    - ask_human
+    - write_task_trace
+  on_requires_human_approval:
+    - ask_human
+    - write_task_trace
+  write_trace: true
+
+audit:
+  trace_required: true
+  trace_formats:
+    - markdown
+    - json
+  record:
+    - repo_commit_sha
+    - branch_or_worktree_id
+    - contract_sha
+    - schema_version
+    - command_exit_codes
+    - route_decision
+  redaction:
+    payload_storage: forbidden
+    summary_policy: redacted_minimum_necessary
+    hashing: hmac_or_per_run_salt
+  retention:
+    classification: normal
+    policy: retain per Multica engineering trace policy
