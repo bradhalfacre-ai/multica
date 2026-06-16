@@ -175,6 +175,9 @@ type Daemon struct {
 
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
+	if cfg.MaxConcurrentTasks <= 0 {
+		cfg.MaxConcurrentTasks = DefaultMaxConcurrentTasks
+	}
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
 	client := NewClient(cfg.ServerBaseURL)
 	// Tag every daemon HTTP request with the daemon's CLI version so the
@@ -629,6 +632,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"agent_timeout", d.cfg.AgentTimeout,
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
+		"max_claim_slots", d.cfg.MaxConcurrentTasks,
 		"gc_enabled", d.cfg.GCEnabled,
 		"auto_update", d.cfg.AutoUpdateEnabled,
 		"launched_by", d.cfg.LaunchedBy,
@@ -1803,6 +1807,12 @@ func (d *Daemon) exitClaim() {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
 	d.claimsInFlight--
+}
+
+func (d *Daemon) claimsInFlightSnapshot() int {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return d.claimsInFlight
 }
 
 // trySetClaimBarrier atomically pauses new ClaimTask calls if the daemon is

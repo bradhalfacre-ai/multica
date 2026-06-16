@@ -182,6 +182,13 @@ Daemon behavior is configured via flags or environment variables:
 | GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
 
+The daemon currently uses `--max-concurrent-tasks` as the shared capacity for
+both `/tasks/claim` polling and local agent execution. Local `/health` reports
+that shared capacity as `max_concurrent_tasks` and `max_claim_slots`, plus
+`claims_in_flight`, `active_task_count`, and `registered_runtime_count`, so
+operators can tell whether queued work is blocked by active execution or by
+claim calls consuming the shared slots.
+
 #### Workspace garbage collection
 
 The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space in three modes:

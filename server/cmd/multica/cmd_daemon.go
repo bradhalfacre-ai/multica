@@ -614,6 +614,21 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 	if version, ok := health["cli_version"].(string); ok && version != "" {
 		rows = append(rows, row{"Version", version})
 	}
+	if v, ok := health["active_task_count"].(float64); ok {
+		rows = append(rows, row{"Active tasks", strconv.Itoa(int(v))})
+	}
+	if v, ok := health["claims_in_flight"].(float64); ok {
+		rows = append(rows, row{"Claims in flight", strconv.Itoa(int(v))})
+	}
+	if v, ok := health["max_concurrent_tasks"].(float64); ok {
+		rows = append(rows, row{"Max tasks", strconv.Itoa(int(v))})
+	}
+	if v, ok := health["max_claim_slots"].(float64); ok {
+		rows = append(rows, row{"Max claim slots", strconv.Itoa(int(v))})
+	}
+	if v, ok := health["registered_runtime_count"].(float64); ok {
+		rows = append(rows, row{"Registered runtimes", strconv.Itoa(int(v))})
+	}
 	if agents, ok := health["agents"].([]any); ok && len(agents) > 0 {
 		parts := make([]string, len(agents))
 		for i, a := range agents {

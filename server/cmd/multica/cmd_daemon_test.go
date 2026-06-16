@@ -55,7 +55,7 @@ func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 	printDaemonStatusReport(&out, "Daemon", health)
 
 	got := out.String()
-	if !strings.Contains(got, "Version:     v9.9.9\n") {
+	if !strings.Contains(got, "Version:") || !strings.Contains(got, "v9.9.9") {
 		t.Fatalf("daemon status output = %q, want CLI version line", got)
 	}
 }

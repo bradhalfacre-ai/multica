@@ -19,15 +19,19 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 
 	d := &Daemon{
 		cfg: Config{
-			CLIVersion:    "v9.9.9",
-			DaemonID:      "daemon-test",
-			DeviceName:    "dev",
-			ServerBaseURL: "http://localhost:8080",
+			CLIVersion:         "v9.9.9",
+			DaemonID:           "daemon-test",
+			DeviceName:         "dev",
+			ServerBaseURL:      "http://localhost:8080",
+			MaxConcurrentTasks: 2,
 		},
-		workspaces: map[string]*workspaceState{},
-		logger:     slog.Default(),
+		workspaces: map[string]*workspaceState{
+			"ws-1": {runtimeIDs: []string{"rt-1", "rt-2"}},
+		},
+		logger: slog.Default(),
 	}
 	d.activeTasks.Store(3)
+	d.claimsInFlight = 1
 	d.ready.Store(true) // preflight done -> status should be "running"
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -52,6 +56,18 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	if got, want := raw["active_task_count"], float64(3); got != want {
 		t.Errorf("active_task_count key: got %v, want %v", got, want)
 	}
+	if got, want := raw["claims_in_flight"], float64(1); got != want {
+		t.Errorf("claims_in_flight key: got %v, want %v", got, want)
+	}
+	if got, want := raw["max_concurrent_tasks"], float64(2); got != want {
+		t.Errorf("max_concurrent_tasks key: got %v, want %v", got, want)
+	}
+	if got, want := raw["max_claim_slots"], float64(2); got != want {
+		t.Errorf("max_claim_slots key: got %v, want %v", got, want)
+	}
+	if got, want := raw["registered_runtime_count"], float64(2); got != want {
+		t.Errorf("registered_runtime_count key: got %v, want %v", got, want)
+	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
 	}
@@ -73,6 +89,18 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	}
 	if resp.ActiveTaskCount != 3 {
 		t.Errorf("ActiveTaskCount: got %d, want 3", resp.ActiveTaskCount)
+	}
+	if resp.ClaimsInFlight != 1 {
+		t.Errorf("ClaimsInFlight: got %d, want 1", resp.ClaimsInFlight)
+	}
+	if resp.MaxConcurrentTasks != 2 {
+		t.Errorf("MaxConcurrentTasks: got %d, want 2", resp.MaxConcurrentTasks)
+	}
+	if resp.MaxClaimSlots != 2 {
+		t.Errorf("MaxClaimSlots: got %d, want 2", resp.MaxClaimSlots)
+	}
+	if resp.RegisteredRuntimeCount != 2 {
+		t.Errorf("RegisteredRuntimeCount: got %d, want 2", resp.RegisteredRuntimeCount)
 	}
 }
 
