@@ -165,8 +165,8 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := uuidToString(issue.WorkspaceID)
 	actorType, _ := h.resolveActor(r, userID, workspaceID)
-	if key == issueguard.RepoVisibilityOverrideKey && actorType == "agent" {
-		writeError(w, http.StatusForbidden, "agents cannot author repo_visibility_override")
+	if issueguard.IsAgentProtectedMetadataKey(key) && actorType == "agent" {
+		writeError(w, http.StatusForbidden, "agents cannot author repo visibility evidence metadata")
 		return
 	}
 

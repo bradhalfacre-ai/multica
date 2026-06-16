@@ -2478,15 +2478,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	var inReviewGuard issueguard.InReviewGuardResult
 	if req.Status != nil {
-		guardMetadata := parseIssueMetadata(prevIssue.Metadata)
-		h.addForgePilotRequiredLabelSignal(r.Context(), prevIssue, guardMetadata)
-		inReviewGuard, err = issueguard.EvaluateInReviewTransition(prevIssue.Status, *req.Status, guardMetadata, actorType, time.Now().UTC())
+		inReviewGuard, err = h.evaluateInReviewTransition(r.Context(), prevIssue, *req.Status, actorType, actorID, time.Now().UTC())
 		if err != nil {
-			if errors.Is(err, issueguard.ErrRepoVisibilityOverrideRejected) {
-				writeError(w, http.StatusForbidden, err.Error())
-				return
-			}
-			writeError(w, http.StatusConflict, err.Error())
+			writeInReviewGuardError(w, err)
 			return
 		}
 	}
@@ -2593,7 +2587,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if statusChanged && inReviewGuard.OverrideUsed {
-		h.auditRepoVisibilityOverride(r.Context(), issue, actorType, actorID, inReviewGuard)
+		h.auditRepoVisibilityOverride(r.Context(), issue, prevIssue.Status, actorType, actorID, inReviewGuard)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2619,14 +2613,28 @@ func (h *Handler) addForgePilotRequiredLabelSignal(ctx context.Context, issue db
 	}
 }
 
-func (h *Handler) auditRepoVisibilityOverride(ctx context.Context, issue db.Issue, actorType, actorID string, guard issueguard.InReviewGuardResult) {
+func (h *Handler) evaluateInReviewTransition(ctx context.Context, issue db.Issue, nextStatus, actorType, actorID string, now time.Time) (issueguard.InReviewGuardResult, error) {
+	guardMetadata := parseIssueMetadata(issue.Metadata)
+	h.addForgePilotRequiredLabelSignal(ctx, issue, guardMetadata)
+	return issueguard.EvaluateInReviewTransition(issue.Status, nextStatus, guardMetadata, actorType, actorID, now)
+}
+
+func writeInReviewGuardError(w http.ResponseWriter, err error) {
+	if errors.Is(err, issueguard.ErrRepoVisibilityOverrideRejected) {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeError(w, http.StatusConflict, err.Error())
+}
+
+func (h *Handler) auditRepoVisibilityOverride(ctx context.Context, issue db.Issue, fromStatus, actorType, actorID string, guard issueguard.InReviewGuardResult) {
 	actorUUID, err := util.ParseUUID(actorID)
 	if err != nil {
 		slog.Warn("repo visibility override audit skipped: actor id is not a uuid", "issue_id", uuidToString(issue.ID), "actor_type", actorType, "actor_id", actorID)
 		return
 	}
 	details, err := json.Marshal(map[string]any{
-		"from_status":     "in_progress",
+		"from_status":     fromStatus,
 		"to_status":       "in_review",
 		"override_actor":  guard.OverrideActor,
 		"override_reason": guard.OverrideReason,
@@ -2932,6 +2940,32 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	inReviewGuards := map[string]issueguard.InReviewGuardResult{}
+	if req.Updates.Status != nil {
+		now := time.Now().UTC()
+		for _, issueID := range req.IssueIDs {
+			issueUUID, err := util.ParseUUID(issueID)
+			if err != nil {
+				continue
+			}
+			prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				ID:          issueUUID,
+				WorkspaceID: wsUUID,
+			})
+			if err != nil {
+				continue
+			}
+			guard, err := h.evaluateInReviewTransition(r.Context(), prevIssue, *req.Updates.Status, actorType, actorID, now)
+			if err != nil {
+				writeInReviewGuardError(w, err)
+				return
+			}
+			if guard.Required {
+				inReviewGuards[uuidToString(prevIssue.ID)] = guard
+			}
+		}
+	}
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
@@ -3081,7 +3115,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
@@ -3129,6 +3162,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
+		}
+
+		if statusChanged {
+			if guard := inReviewGuards[uuidToString(prevIssue.ID)]; guard.OverrideUsed {
+				h.auditRepoVisibilityOverride(r.Context(), issue, prevIssue.Status, actorType, actorID, guard)
+			}
 		}
 
 		updated++

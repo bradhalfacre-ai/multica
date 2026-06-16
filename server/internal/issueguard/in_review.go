@@ -14,6 +14,23 @@ const (
 	repoVisibilityFutureSkew      = 5 * time.Minute
 )
 
+var AgentProtectedMetadataKeys = map[string]struct{}{
+	RepoVisibilityOverrideKey:                  {},
+	"repo_visibility_override_actor_type":      {},
+	"repo_visibility_override_actor_id":        {},
+	"repo_visibility_override_reason":          {},
+	"repo_visibility_override_at":              {},
+	"repo_visibility_attestation":              {},
+	"repo_visibility_branch":                   {},
+	"repo_visibility_commit":                   {},
+	"repo_visibility_attested_branch":          {},
+	"repo_visibility_attested_commit":          {},
+	"repo_visibility_attested_at":              {},
+	"repo_visibility_attestation_checked_at":   {},
+	"repo_visibility_attestation_checked_by":   {},
+	"repo_visibility_attestation_checked_type": {},
+}
+
 var (
 	ErrRepoVisibilityAttestationRequired = errors.New("repo visibility attestation required before moving this issue to in_review")
 	ErrRepoVisibilityOverrideRejected    = errors.New("repo visibility override is not authorized for this transition")
@@ -27,8 +44,8 @@ type InReviewGuardResult struct {
 	OverrideAt     string
 }
 
-func EvaluateInReviewTransition(prevStatus, nextStatus string, metadata map[string]any, actorType string, now time.Time) (InReviewGuardResult, error) {
-	if prevStatus != "in_progress" || nextStatus != "in_review" {
+func EvaluateInReviewTransition(prevStatus, nextStatus string, metadata map[string]any, actorType, actorID string, now time.Time) (InReviewGuardResult, error) {
+	if nextStatus != "in_review" || prevStatus == "in_review" {
 		return InReviewGuardResult{}, nil
 	}
 	if !metadataTruthy(metadata, "forgepilot_required") && !metadataTruthy(metadata, "source_writing") {
@@ -37,7 +54,7 @@ func EvaluateInReviewTransition(prevStatus, nextStatus string, metadata map[stri
 
 	result := InReviewGuardResult{Required: true}
 	if hasRepoVisibilityOverride(metadata) {
-		ok, reason, actor, at := authorizedRepoVisibilityOverride(metadata)
+		ok, reason, actor, at := authorizedRepoVisibilityOverride(metadata, actorType, actorID)
 		if !ok {
 			return result, ErrRepoVisibilityOverrideRejected
 		}
@@ -54,26 +71,39 @@ func EvaluateInReviewTransition(prevStatus, nextStatus string, metadata map[stri
 	return result, ErrRepoVisibilityAttestationRequired
 }
 
+func IsAgentProtectedMetadataKey(key string) bool {
+	_, ok := AgentProtectedMetadataKeys[key]
+	return ok
+}
+
 func hasRepoVisibilityOverride(metadata map[string]any) bool {
 	return metadataTruthy(metadata, RepoVisibilityOverrideKey)
 }
 
-func authorizedRepoVisibilityOverride(metadata map[string]any) (bool, string, string, string) {
-	actorType := strings.ToLower(strings.TrimSpace(metadataString(metadata, "repo_visibility_override_actor_type")))
-	actorID := strings.TrimSpace(metadataString(metadata, "repo_visibility_override_actor_id"))
+func authorizedRepoVisibilityOverride(metadata map[string]any, requestActorType, requestActorID string) (bool, string, string, string) {
+	metadataActorType := strings.ToLower(strings.TrimSpace(metadataString(metadata, "repo_visibility_override_actor_type")))
+	metadataActorID := strings.TrimSpace(metadataString(metadata, "repo_visibility_override_actor_id"))
+	requestActorType = strings.ToLower(strings.TrimSpace(requestActorType))
+	requestActorID = strings.TrimSpace(requestActorID)
 	reason := strings.TrimSpace(metadataString(metadata, "repo_visibility_override_reason"))
 	at := strings.TrimSpace(metadataString(metadata, "repo_visibility_override_at"))
 
-	if actorType == "agent" || actorType == "" || actorID == "" || reason == "" || at == "" {
+	if requestActorType == "agent" || requestActorType == "" || requestActorID == "" || reason == "" || at == "" {
 		return false, "", "", ""
 	}
-	if actorType != "member" && actorType != "orchestrator" && actorType != "system" {
+	if requestActorType != "member" && requestActorType != "orchestrator" && requestActorType != "system" {
+		return false, "", "", ""
+	}
+	if metadataActorType == "" || metadataActorID == "" {
+		return false, "", "", ""
+	}
+	if metadataActorType != requestActorType || metadataActorID != requestActorID {
 		return false, "", "", ""
 	}
 	if _, err := time.Parse(time.RFC3339, at); err != nil {
 		return false, "", "", ""
 	}
-	return true, reason, fmt.Sprintf("%s:%s", actorType, actorID), at
+	return true, reason, fmt.Sprintf("%s:%s", requestActorType, requestActorID), at
 }
 
 func validRepoVisibilityAttestation(metadata map[string]any, now time.Time) bool {

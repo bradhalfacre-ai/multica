@@ -13,6 +13,10 @@ import (
 )
 
 func createInReviewGuardIssue(t *testing.T, metadata map[string]any) string {
+	return createInReviewGuardIssueWithStatus(t, "in_progress", metadata)
+}
+
+func createInReviewGuardIssueWithStatus(t *testing.T, status string, metadata map[string]any) string {
 	t.Helper()
 
 	rawMetadata, err := json.Marshal(metadata)
@@ -26,12 +30,12 @@ func createInReviewGuardIssue(t *testing.T, metadata map[string]any) string {
 			workspace_id, title, status, priority, creator_type, creator_id, number, metadata
 		)
 		VALUES (
-			$1, $2, 'in_progress', 'high', 'member', $3,
+			$1, $2, $3, 'high', 'member', $4,
 			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
-			$4::jsonb
+			$5::jsonb
 		)
 		RETURNING id
-	`, testWorkspaceID, "in review guard test "+time.Now().Format(time.RFC3339Nano), testUserID, string(rawMetadata)).Scan(&issueID); err != nil {
+	`, testWorkspaceID, "in review guard test "+time.Now().Format(time.RFC3339Nano), status, testUserID, string(rawMetadata)).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 
@@ -145,6 +149,62 @@ func TestUpdateIssueInReviewGuardAcceptsMatchingAttestation(t *testing.T) {
 	}
 }
 
+func TestUpdateIssueInReviewGuardRejectsStaleAttestation(t *testing.T) {
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required":         true,
+		"pinned_branch":               "agent/test",
+		"pinned_commit":               "abc123",
+		"repo_visibility_attestation": "passed",
+		"repo_visibility_branch":      "agent/test",
+		"repo_visibility_commit":      "abc123",
+		"repo_visibility_attested_at": time.Now().UTC().Add(-25 * time.Hour).Format(time.RFC3339),
+	})
+
+	w := updateIssueStatusForGuard(t, issueID, newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "in_review",
+	}))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for stale attestation, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateIssueInReviewGuardRejectsFutureSkewAttestation(t *testing.T) {
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required":         true,
+		"pinned_branch":               "agent/test",
+		"pinned_commit":               "abc123",
+		"repo_visibility_attestation": "passed",
+		"repo_visibility_branch":      "agent/test",
+		"repo_visibility_commit":      "abc123",
+		"repo_visibility_attested_at": time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
+	})
+
+	w := updateIssueStatusForGuard(t, issueID, newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "in_review",
+	}))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for future-skew attestation, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateIssueInReviewGuardRejectsStatusHopIntoInReview(t *testing.T) {
+	issueID := createInReviewGuardIssueWithStatus(t, "todo", map[string]any{
+		"forgepilot_required": true,
+		"pinned_branch":       "agent/test",
+		"pinned_commit":       "abc123",
+	})
+
+	w := updateIssueStatusForGuard(t, issueID, newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "in_review",
+	}))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for todo -> in_review without attestation, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestUpdateIssueInReviewGuardAcceptsAuthorizedOverrideAndAudits(t *testing.T) {
 	overrideAt := time.Now().UTC().Format(time.RFC3339)
 	issueID := createInReviewGuardIssue(t, map[string]any{
@@ -183,6 +243,48 @@ func TestUpdateIssueInReviewGuardAcceptsAuthorizedOverrideAndAudits(t *testing.T
 	}
 }
 
+func TestUpdateIssueInReviewGuardRejectsOverrideActorMismatch(t *testing.T) {
+	overrideAt := time.Now().UTC().Format(time.RFC3339)
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required":                 true,
+		"pinned_branch":                       "agent/test",
+		"pinned_commit":                       "abc123",
+		"repo_visibility_override":            "approved",
+		"repo_visibility_override_actor_type": "member",
+		"repo_visibility_override_actor_id":   "00000000-0000-0000-0000-000000000000",
+		"repo_visibility_override_reason":     "human verified remote branch and commit",
+		"repo_visibility_override_at":         overrideAt,
+	})
+
+	w := updateIssueStatusForGuard(t, issueID, newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "in_review",
+	}))
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for mismatched override actor, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateIssueInReviewGuardRejectsOverrideMissingActor(t *testing.T) {
+	overrideAt := time.Now().UTC().Format(time.RFC3339)
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required":             true,
+		"pinned_branch":                   "agent/test",
+		"pinned_commit":                   "abc123",
+		"repo_visibility_override":        "approved",
+		"repo_visibility_override_reason": "human verified remote branch and commit",
+		"repo_visibility_override_at":     overrideAt,
+	})
+
+	w := updateIssueStatusForGuard(t, issueID, newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "in_review",
+	}))
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for missing override actor, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestSetIssueMetadataRejectsAgentAuthoredRepoVisibilityOverride(t *testing.T) {
 	issueID := createInReviewGuardIssue(t, map[string]any{
 		"forgepilot_required": true,
@@ -198,5 +300,59 @@ func TestSetIssueMetadataRejectsAgentAuthoredRepoVisibilityOverride(t *testing.T
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for agent-authored override, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSetIssueMetadataRejectsAgentAuthoredRepoVisibilityAttestation(t *testing.T) {
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required": true,
+	})
+	agentID := createHandlerTestAgent(t, "repo-visibility-attestation-agent", []byte(`{}`))
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+
+	for _, key := range []string{
+		"repo_visibility_attestation",
+		"repo_visibility_branch",
+		"repo_visibility_commit",
+		"repo_visibility_attested_at",
+	} {
+		t.Run(key, func(t *testing.T) {
+			req := newRequest("PUT", "/api/issues/"+issueID+"/metadata/"+key, json.RawMessage(`{"value":"passed"}`))
+			req.Header.Set("X-Agent-ID", agentID)
+			req.Header.Set("X-Task-ID", taskID)
+			w := httptest.NewRecorder()
+			testHandler.SetIssueMetadataKey(w, withGuardURLParams(req, "id", issueID, "key", key))
+
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected 403 for agent-authored %s, got %d: %s", key, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestBatchUpdateIssuesInReviewGuardRejectsMissingAttestation(t *testing.T) {
+	issueID := createInReviewGuardIssue(t, map[string]any{
+		"forgepilot_required": true,
+		"pinned_branch":       "agent/test",
+		"pinned_commit":       "abc123",
+	})
+
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{issueID},
+		"updates":   map[string]any{"status": "in_review"},
+	})
+	w := httptest.NewRecorder()
+	testHandler.BatchUpdateIssues(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for batch missing attestation, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("load issue status: %v", err)
+	}
+	if status != "in_progress" {
+		t.Fatalf("expected batch rejection to leave status in_progress, got %q", status)
 	}
 }

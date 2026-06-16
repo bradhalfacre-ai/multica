@@ -1,7 +1,7 @@
 agent_contract:
   id: multica.c2-123.in-review-guard.act
   spec_version: "0.2"
-  contract_version: "0.2.1"
+  contract_version: "0.2.2"
   type: code_change
   description: Implement ADR-0006 In Review transition enforcement in Multica issue status updates.
   risk_level: high
@@ -48,12 +48,15 @@ run_policy:
     default: deny
     allowed:
       - id: go_handler_tests
-        executable: go
+        executable: env
         args:
+          - GOCACHE=/tmp/c2-123-go-build-cache
+          - GOMODCACHE=/tmp/c2-123-go-mod-cache
+          - go
           - test
           - ./internal/handler
           - -run
-          - TestUpdateIssueInReviewGuard|TestSetIssueMetadataRejectsAgentAuthoredRepoVisibilityOverride
+          - TestUpdateIssueInReviewGuard|TestSetIssueMetadataRejectsAgentAuthoredRepoVisibility|TestBatchUpdateIssuesInReviewGuard
         shell: none
         cwd: server
         timeout_ms: 120000
