@@ -7,7 +7,6 @@ agent_contract:
   risk_level: medium
   sensitivity: internal
   owner: Brad Halfacre
-  complexity: medium
 
 run_policy:
   execution_mode: act
